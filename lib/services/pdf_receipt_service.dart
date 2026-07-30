@@ -30,23 +30,53 @@ class PdfReceiptService {
     }
   }
 
-  /// Generate and open PDF thermal print / preview sheet for a completed Sale
+  /// Print thermal 80mm ticket
   static Future<void> printReceipt({
     required Sale sale,
     required List<SaleItem> items,
     required List<Product> products,
-    String storeName = 'QUINCAILLERIE EXPRESS',
+    String storeName = 'QUINCAILLERIE PRO',
+    String? customerName,
   }) async {
     final pdfBytes = await buildReceiptPdfBytes(
       sale: sale,
       items: items,
       products: products,
       storeName: storeName,
+      customerName: customerName,
     );
 
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdfBytes,
       name: 'Ticket_${sale.id.substring(0, 8)}.pdf',
+    );
+  }
+
+  /// Print or share full A4 Invoice
+  static Future<void> printA4Invoice({
+    required Sale sale,
+    required List<SaleItem> items,
+    required List<Product> products,
+    String storeName = 'QUINCAILLERIE PRO',
+    String storePhone = '',
+    String storeAddress = '',
+    String? customerName,
+    String? customerPhone,
+  }) async {
+    final pdfBytes = await buildA4InvoicePdfBytes(
+      sale: sale,
+      items: items,
+      products: products,
+      storeName: storeName,
+      storePhone: storePhone,
+      storeAddress: storeAddress,
+      customerName: customerName,
+      customerPhone: customerPhone,
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdfBytes,
+      name: 'Facture_${sale.id.substring(0, 8)}.pdf',
     );
   }
 
@@ -56,6 +86,7 @@ class PdfReceiptService {
     required List<SaleItem> items,
     required List<Product> products,
     required String storeName,
+    String? customerName,
   }) async {
     final doc = pw.Document();
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
@@ -69,43 +100,27 @@ class PdfReceiptService {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // Store Header
               pw.Center(
                 child: pw.Text(
                   storeName,
-                  style: pw.TextStyle(
-                    fontSize: 16,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
+                  style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
                 ),
               ),
               pw.SizedBox(height: 4),
               pw.Center(
-                child: pw.Text(
-                  'Ticket de caisse',
-                  style: const pw.TextStyle(fontSize: 12),
-                ),
+                child: pw.Text('Ticket de caisse', style: const pw.TextStyle(fontSize: 12)),
               ),
               pw.SizedBox(height: 8),
               pw.Divider(thickness: 1),
 
-              // Sale Details
-              pw.Text(
-                'N° Vente: #${sale.id.substring(0, 8)}',
-                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
-              ),
-              pw.Text(
-                'Date: ${dateFormat.format(sale.createdAt)}',
-                style: const pw.TextStyle(fontSize: 10),
-              ),
-              pw.Text(
-                'Paiement: ${_getPaymentLabel(sale.paymentMethod)}',
-                style: const pw.TextStyle(fontSize: 10),
-              ),
+              pw.Text('N° Vente: #${sale.id.substring(0, 8)}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Date: ${dateFormat.format(sale.createdAt)}', style: const pw.TextStyle(fontSize: 10)),
+              if (customerName != null && customerName.isNotEmpty)
+                pw.Text('Client: $customerName', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Paiement: ${_getPaymentLabel(sale.paymentMethod)}', style: const pw.TextStyle(fontSize: 10)),
               pw.SizedBox(height: 8),
               pw.Divider(thickness: 1),
 
-              // Items Header
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -115,7 +130,6 @@ class PdfReceiptService {
               ),
               pw.SizedBox(height: 4),
 
-              // Items List
               ...items.map((item) {
                 final product = productMap[item.productId];
                 final prodName = product?.name ?? 'Produit #${item.productId.substring(0, 6)}';
@@ -126,21 +140,12 @@ class PdfReceiptService {
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text(
-                        prodName,
-                        style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
-                      ),
+                      pw.Text(prodName, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          pw.Text(
-                            '  ${item.quantity} $unitSuffix x ${item.unitPrice.toStringAsFixed(3)}',
-                            style: const pw.TextStyle(fontSize: 9),
-                          ),
-                          pw.Text(
-                            '${item.subtotal.toStringAsFixed(3)} TND',
-                            style: const pw.TextStyle(fontSize: 9),
-                          ),
+                          pw.Text('  ${item.quantity} $unitSuffix x ${item.unitPrice.toStringAsFixed(3)}', style: const pw.TextStyle(fontSize: 9)),
+                          pw.Text('${item.subtotal.toStringAsFixed(3)} TND', style: const pw.TextStyle(fontSize: 9)),
                         ],
                       ),
                     ],
@@ -151,28 +156,146 @@ class PdfReceiptService {
               pw.SizedBox(height: 8),
               pw.Divider(thickness: 1),
 
-              // Total Amount
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text(
-                    'TOTAL À PAYER:',
-                    style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
-                  ),
-                  pw.Text(
-                    '${sale.total.toStringAsFixed(3)} TND',
-                    style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
-                  ),
+                  pw.Text('TOTAL À PAYER:', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('${sale.total.toStringAsFixed(3)} TND', style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)),
                 ],
               ),
               pw.SizedBox(height: 16),
-
-              // Footer
               pw.Center(
-                child: pw.Text(
-                  'Merci de votre confiance !',
-                  style: const pw.TextStyle(fontSize: 10),
+                child: pw.Text('Merci de votre confiance !', style: const pw.TextStyle(fontSize: 10)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    return doc.save();
+  }
+
+  /// Builds A4 Invoice Format
+  static Future<Uint8List> buildA4InvoicePdfBytes({
+    required Sale sale,
+    required List<SaleItem> items,
+    required List<Product> products,
+    required String storeName,
+    required String storePhone,
+    required String storeAddress,
+    String? customerName,
+    String? customerPhone,
+  }) async {
+    final doc = pw.Document();
+    final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
+    final productMap = {for (var p in products) p.id: p};
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // Header Row
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(storeName, style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold, color: PdfColors.amber800)),
+                      if (storeAddress.isNotEmpty) pw.Text(storeAddress, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                      if (storePhone.isNotEmpty) pw.Text('Tél: $storePhone', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                    ],
+                  ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text('FACTURE', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey900)),
+                      pw.Text('N° FAC-${sale.id.substring(0, 8).toUpperCase()}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                      pw.Text('Date: ${dateFormat.format(sale.createdAt)}', style: const pw.TextStyle(fontSize: 10)),
+                    ],
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 24),
+              pw.Divider(),
+
+              // Customer Info Block
+              if (customerName != null && customerName.isNotEmpty) ...[
+                pw.Container(
+                  padding: const pw.EdgeInsets.all(10),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.grey100,
+                    borderRadius: pw.BorderRadius.circular(6),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Client:', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                      pw.Text(customerName, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                      if (customerPhone != null && customerPhone.isNotEmpty) pw.Text('Tél: $customerPhone', style: const pw.TextStyle(fontSize: 10)),
+                    ],
+                  ),
                 ),
+                pw.SizedBox(height: 20),
+              ],
+
+              // Table Header
+              pw.TableHelper.fromTextArray(
+                context: context,
+                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.amber800),
+                headers: ['Désignation', 'Quantité', 'Prix Unitaire (TND)', 'Total (TND)'],
+                data: items.map((item) {
+                  final p = productMap[item.productId];
+                  final name = p?.name ?? 'Produit #${item.productId.substring(0, 6)}';
+                  final unitSuffix = p != null ? _getUnitSuffix(p.unit) : '';
+                  return [
+                    name,
+                    '${item.quantity} $unitSuffix',
+                    item.unitPrice.toStringAsFixed(3),
+                    item.subtotal.toStringAsFixed(3),
+                  ];
+                }).toList(),
+              ),
+
+              pw.SizedBox(height: 20),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Container(
+                    width: 200,
+                    child: pw.Column(
+                      children: [
+                        pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text('Mode de Paiement:'),
+                            pw.Text(_getPaymentLabel(sale.paymentMethod), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                          ],
+                        ),
+                        pw.Divider(),
+                        pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text('TOTAL NET:', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                            pw.Text('${sale.total.toStringAsFixed(3)} DT', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.green800)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              pw.Spacer(),
+              pw.Center(
+                child: pw.Text('Arrêté la présente facture à la somme de ${sale.total.toStringAsFixed(3)} Dinars Tunisiens.', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
               ),
             ],
           );

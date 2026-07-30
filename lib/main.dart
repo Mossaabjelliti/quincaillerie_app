@@ -3,9 +3,12 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'data/local/database.dart';
 import 'services/sync_service.dart';
+import 'core/auth/auth_service.dart';
+import 'core/auth/auth_provider.dart';
+import 'features/auth/login_screen.dart';
+import 'features/auth/store_selection_screen.dart';
 import 'features/scan/scan_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
-
 import 'theme/app_theme.dart';
 import 'features/add_product/add_product_screen.dart';
 import 'features/cart/cart_provider.dart';
@@ -24,13 +27,18 @@ Future<void> main() async {
   );
 
   final db = AppDatabase();
+  final authService = AuthService(supabase: Supabase.instance.client);
   final syncService = SyncService(db: db, supabase: Supabase.instance.client);
 
   runApp(
     MultiProvider(
       providers: [
         Provider<AppDatabase>.value(value: db),
+        Provider<AuthService>.value(value: authService),
         Provider<SyncService>.value(value: syncService),
+        ChangeNotifierProvider<AuthProvider>(
+          create: (_) => AuthProvider(authService: authService, db: db),
+        ),
         ChangeNotifierProvider<CartProvider>(create: (_) => CartProvider()),
       ],
       child: const QuincaillerieApp(),
@@ -44,30 +52,70 @@ class QuincaillerieApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Quincaillerie Stock',
+      title: 'Quincaillerie Pro OS',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       routes: {
         '/add-product': (context) {
+          final session = context.read<AuthProvider>().session;
           final barcode = ModalRoute.of(context)?.settings.arguments as String?;
           return AddProductScreen(
-            storeId: 'demo-store',
+            storeId: session?.currentStoreId ?? 'demo-store',
             initialBarcode: barcode,
           );
         },
-        '/cart': (context) => const CartScreen(
-              storeId: 'demo-store',
-              userId: 'demo-user',
-            ),
+        '/cart': (context) {
+          final session = context.read<AuthProvider>().session;
+          return CartScreen(
+            storeId: session?.currentStoreId ?? 'demo-store',
+            userId: session?.userId ?? 'demo-user',
+          );
+        },
         '/qr-generator': (context) {
           final product = ModalRoute.of(context)?.settings.arguments as Product?;
           return QrGeneratorScreen(product: product);
         },
       },
-      // TODO Phase 1: real auth flow. Hardcoded ids below unblock scaffolding
-      // and let you test the scan -> stock -> dashboard loop end to end.
-      home: const _HomeShell(storeId: 'demo-store', userId: 'demo-user'),
+      home: const AuthWrapper(),
     );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+
+    switch (auth.status) {
+      case AuthStatus.authenticating:
+        return const Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(color: Colors.amber),
+                SizedBox(height: 16),
+                Text('Chargement de l\'espace Quincaillerie...'),
+              ],
+            ),
+          ),
+        );
+      case AuthStatus.authenticated:
+        if (auth.session != null && auth.session!.hasActiveStore) {
+          return _HomeShell(
+            storeId: auth.session!.currentStoreId!,
+            userId: auth.session!.userId,
+          );
+        }
+        return const StoreSelectionScreen();
+      case AuthStatus.noStore:
+        return const StoreSelectionScreen();
+      case AuthStatus.uninitialized:
+      case AuthStatus.error:
+        return const LoginScreen();
+    }
   }
 }
 
@@ -85,6 +133,7 @@ class _HomeShellState extends State<_HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
     final screens = [
       ScanScreen(storeId: widget.storeId, userId: widget.userId),
       InventoryScreen(storeId: widget.storeId),
@@ -93,6 +142,25 @@ class _HomeShellState extends State<_HomeShell> {
     ];
 
     return Scaffold(
+      appBar: AppBar(
+        title: Text(auth.session?.currentStoreName ?? 'Quincaillerie'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.swap_horiz_rounded),
+            tooltip: 'Changer de magasin',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const StoreSelectionScreen()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded),
+            tooltip: 'Déconnexion',
+            onPressed: () => auth.signOut(),
+          ),
+        ],
+      ),
       body: screens[_index],
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.sync),
