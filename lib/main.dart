@@ -22,8 +22,8 @@ Future<void> main() async {
 
   // Replace with your real project values (Supabase dashboard > Settings > API).
   await Supabase.initialize(
-    url: 'https://YOUR_PROJECT.supabase.co',
-    publishableKey: 'YOUR_ANON_KEY',
+    url: 'https://rytkmzxmesjymyezpxmk.supabase.co/rest/v1/',
+    publishableKey: 'sb_publishable_7XLhqMboA3mXLwSiR3BBdA_oO78Zt2e',
   );
 
   final db = AppDatabase();
