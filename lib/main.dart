@@ -9,6 +9,9 @@ import 'features/dashboard/dashboard_screen.dart';
 import 'features/add_product/add_product_screen.dart';
 import 'features/cart/cart_provider.dart';
 import 'features/cart/cart_screen.dart';
+import 'features/inventory/inventory_screen.dart';
+import 'features/sales/sales_screen.dart';
+import 'features/qr_generator/qr_generator_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,6 +60,10 @@ class QuincaillerieApp extends StatelessWidget {
               storeId: 'demo-store',
               userId: 'demo-user',
             ),
+        '/qr-generator': (context) {
+          final product = ModalRoute.of(context)?.settings.arguments as Product?;
+          return QrGeneratorScreen(product: product);
+        },
       },
       // TODO Phase 1: real auth flow. Hardcoded ids below unblock scaffolding
       // and let you test the scan -> stock -> dashboard loop end to end.
@@ -81,6 +88,8 @@ class _HomeShellState extends State<_HomeShell> {
   Widget build(BuildContext context) {
     final screens = [
       ScanScreen(storeId: widget.storeId, userId: widget.userId),
+      InventoryScreen(storeId: widget.storeId),
+      SalesScreen(storeId: widget.storeId),
       DashboardScreen(storeId: widget.storeId),
     ];
 
@@ -107,6 +116,8 @@ class _HomeShellState extends State<_HomeShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.qr_code_scanner), label: 'Scanner'),
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Inventaire'),
+          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Ventes'),
           NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Tableau de bord'),
         ],
       ),

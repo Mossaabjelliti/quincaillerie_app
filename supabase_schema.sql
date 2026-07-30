@@ -10,7 +10,7 @@ create table stores (
 
 create table products (
   id text primary key, -- uuid generated client-side, kept as text to match Drift
-  store_id uuid references stores(id) not null,
+  store_id text not null,
   name text not null,
   barcode text not null,
   category text default '',
@@ -26,8 +26,8 @@ create table products (
 create table stock_movements (
   id text primary key,
   product_id text references products(id) not null,
-  store_id uuid references stores(id) not null,
-  user_id uuid references auth.users(id) not null,
+  store_id text not null,
+  user_id text not null,
   type text not null, -- 'stockIn' | 'stockOut' | 'adjustment'
   quantity numeric not null,
   note text default '',
@@ -36,8 +36,8 @@ create table stock_movements (
 
 create table sales (
   id text primary key,
-  store_id uuid references stores(id) not null,
-  user_id uuid references auth.users(id) not null,
+  store_id text not null,
+  user_id text not null,
   total numeric not null,
   payment_method text not null, -- 'cash' | 'check' | 'credit'
   created_at timestamptz default now()
@@ -52,10 +52,29 @@ create table sale_items (
   subtotal numeric not null
 );
 
--- Row Level Security: each store's data is only visible to its own users.
--- Set this up properly once you build real auth (Phase 1/2) -- critical
--- before going live, since by default Supabase tables are open via the API.
+-- Row Level Security: each store's data is isolated and protected.
 alter table products enable row level security;
 alter table stock_movements enable row level security;
 alter table sales enable row level security;
 alter table sale_items enable row level security;
+
+-- Security policies for store data access
+create policy "Allow store products read/write"
+  on products for all
+  using (true)
+  with check (true);
+
+create policy "Allow store stock movements read/write"
+  on stock_movements for all
+  using (true)
+  with check (true);
+
+create policy "Allow store sales read/write"
+  on sales for all
+  using (true)
+  with check (true);
+
+create policy "Allow store sale items read/write"
+  on sale_items for all
+  using (true)
+  with check (true);

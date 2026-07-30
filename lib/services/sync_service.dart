@@ -100,6 +100,23 @@ class SyncService {
         'payment_method': s.paymentMethod.name,
         'created_at': s.createdAt.toIso8601String(),
       });
+
+      // Push related sale_items
+      final items = await (db.select(db.saleItems)
+            ..where((item) => item.saleId.equals(s.id)))
+          .get();
+
+      for (final item in items) {
+        await supabase.from('sale_items').upsert({
+          'id': item.id,
+          'sale_id': item.saleId,
+          'product_id': item.productId,
+          'quantity': item.quantity,
+          'unit_price': item.unitPrice,
+          'subtotal': item.subtotal,
+        });
+      }
+
       await (db.update(db.sales)..where((row) => row.id.equals(s.id)))
           .write(const SalesCompanion(synced: Value(true)));
     }
