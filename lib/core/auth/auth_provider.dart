@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
@@ -50,19 +51,24 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _loadUserSession(String userId, String email) async {
     try {
-      // 1. Try to load from Supabase remote first
-      final profileRes = await authService.supabase
-          .from('profiles')
-          .select()
-          .eq('id', userId)
-          .maybeSingle();
+      Map<String, dynamic>? profileRes;
+      try {
+        profileRes = await authService.supabase
+            .from('profiles')
+            .select()
+            .eq('id', userId)
+            .maybeSingle();
+      } catch (_) {}
 
-      final membersRes = await authService.supabase
-          .from('store_members')
-          .select('*, stores(*)')
-          .eq('user_id', userId);
+      dynamic membersRes;
+      try {
+        membersRes = await authService.supabase
+            .from('store_members')
+            .select('*, stores(*)')
+            .eq('user_id', userId);
+      } catch (_) {}
 
-      final fullName = profileRes?['full_name'] as String? ?? 'Utilisateur';
+      final fullName = profileRes?['full_name'] as String? ?? email.split('@').first;
       final phone = profileRes?['phone'] as String? ?? '';
       final defaultRole = profileRes?['role'] as String? ?? 'owner';
 
@@ -71,7 +77,7 @@ class AuthProvider extends ChangeNotifier {
       String? activeStoreName;
       String activeRole = defaultRole;
 
-      if ((membersRes as List).isNotEmpty) {
+      if (membersRes != null && (membersRes as List).isNotEmpty) {
         for (final m in membersRes) {
           final sData = m['stores'];
           if (sData != null) {
@@ -85,10 +91,15 @@ class AuthProvider extends ChangeNotifier {
               synced: true,
             );
             loadedStores.add(st);
-
-            // Save store locally to SQLite for offline access
             await db.into(db.stores).insertOnConflictUpdate(st);
           }
+        }
+      }
+
+      final localStores = await db.select(db.stores).get();
+      for (final ls in localStores) {
+        if (!loadedStores.any((s) => s.id == ls.id)) {
+          loadedStores.add(ls);
         }
       }
 
@@ -111,7 +122,6 @@ class AuthProvider extends ChangeNotifier {
         stores: loadedStores,
       );
 
-      // Save profile locally
       await db.into(db.profiles).insertOnConflictUpdate(
             ProfilesCompanion.insert(
               id: userId,
@@ -122,27 +132,20 @@ class AuthProvider extends ChangeNotifier {
             ),
           );
     } catch (e) {
-      // Offline fallback: load from local SQLite Drift database
       final localProfiles = await (db.select(db.profiles)..where((p) => p.id.equals(userId))).get();
       final localStores = await db.select(db.stores).get();
 
-      if (localProfiles.isNotEmpty) {
-        final prof = localProfiles.first;
-        _session = UserSession(
-          userId: userId,
-          userEmail: email,
-          fullName: prof.fullName,
-          phone: prof.phone,
-          currentStoreId: localStores.isNotEmpty ? localStores.first.id : null,
-          currentStoreName: localStores.isNotEmpty ? localStores.first.name : null,
-          currentRole: prof.role,
-          stores: localStores,
-        );
-        _status = localStores.isNotEmpty ? AuthStatus.authenticated : AuthStatus.noStore;
-      } else {
-        _status = AuthStatus.error;
-        _errorMessage = 'Connexion requise pour la première utilisation.';
-      }
+      _session = UserSession(
+        userId: userId,
+        userEmail: email,
+        fullName: localProfiles.isNotEmpty ? localProfiles.first.fullName : email.split('@').first,
+        phone: localProfiles.isNotEmpty ? localProfiles.first.phone : '',
+        currentStoreId: localStores.isNotEmpty ? localStores.first.id : null,
+        currentStoreName: localStores.isNotEmpty ? localStores.first.name : null,
+        currentRole: localProfiles.isNotEmpty ? localProfiles.first.role : 'owner',
+        stores: localStores,
+      );
+      _status = localStores.isNotEmpty ? AuthStatus.authenticated : AuthStatus.noStore;
     }
   }
 
@@ -156,8 +159,16 @@ class AuthProvider extends ChangeNotifier {
       if (res.user != null) {
         await _loadUserSession(res.user!.id, res.user!.email ?? email);
         notifyListeners();
-        return true;
+        return _status == AuthStatus.authenticated || _status == AuthStatus.noStore;
       }
+    } on AuthException catch (e) {
+      if (e.message.contains('Email not confirmed')) {
+        _errorMessage = 'Veuillez confirmer votre e-mail en cliquant sur le lien reçu dans votre boîte de réception ($email) avant de vous connecter.';
+      } else {
+        _errorMessage = 'Échec de connexion: ${e.message}';
+      }
+      _status = AuthStatus.error;
+      notifyListeners();
     } catch (e) {
       _errorMessage = 'Échec de connexion: ${e.toString()}';
       _status = AuthStatus.error;
@@ -186,15 +197,28 @@ class AuthProvider extends ChangeNotifier {
       );
 
       if (res.user != null) {
-        // Create initial store for owner
+        // Create initial store locally & on remote if session active
         await createStore(
           name: storeName,
           ownerId: res.user!.id,
           userFullName: fullName,
           userEmail: email,
         );
+
+        if (res.session == null) {
+          // Email confirmation is required by Supabase project
+          _errorMessage = 'Compte créé avec succès ! Un e-mail de confirmation vous a été envoyé à $email. Veuillez vérifier votre boîte de réception.';
+          _status = AuthStatus.error;
+          notifyListeners();
+          return false;
+        }
+
         return true;
       }
+    } on AuthException catch (e) {
+      _errorMessage = 'Échec d\'inscription: ${e.message}';
+      _status = AuthStatus.error;
+      notifyListeners();
     } catch (e) {
       _errorMessage = 'Échec d\'inscription: ${e.toString()}';
       _status = AuthStatus.error;
@@ -226,7 +250,6 @@ class AuthProvider extends ChangeNotifier {
       synced: false,
     );
 
-    // Save locally
     await db.into(db.stores).insertOnConflictUpdate(newStore);
     await db.into(db.storeMembers).insertOnConflictUpdate(
           StoreMembersCompanion.insert(
@@ -238,7 +261,6 @@ class AuthProvider extends ChangeNotifier {
           ),
         );
 
-    // Sync to Supabase if connected
     try {
       await authService.supabase.from('stores').insert({
         'id': storeId,
@@ -254,9 +276,7 @@ class AuthProvider extends ChangeNotifier {
         'user_id': uid,
         'role': 'owner',
       });
-    } catch (_) {
-      // Offline: local row flagged synced=false will be pushed by SyncManager
-    }
+    } catch (_) {}
 
     await _loadUserSession(uid, userEmail ?? _session?.userEmail ?? '');
     notifyListeners();

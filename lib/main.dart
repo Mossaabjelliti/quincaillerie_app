@@ -20,9 +20,8 @@ import 'features/qr_generator/qr_generator_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Replace with your real project values (Supabase dashboard > Settings > API).
   await Supabase.initialize(
-    url: 'https://rytkmzxmesjymyezpxmk.supabase.co/rest/v1/',
+    url: 'https://rytkmzxmesjymyezpxmk.supabase.co',
     publishableKey: 'sb_publishable_7XLhqMboA3mXLwSiR3BBdA_oO78Zt2e',
   );
 
