@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
+import '../../services/pdf_receipt_service.dart';
 
 class SalesScreen extends StatefulWidget {
   final String storeId;
@@ -207,6 +208,22 @@ class _SalesScreenState extends State<SalesScreen> {
                                             ],
                                           ),
                                         )),
+                                    const SizedBox(height: 12),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        icon: const Icon(Icons.print_outlined),
+                                        label: const Text('Imprimer le reçu (PDF)'),
+                                        onPressed: () async {
+                                          final products = await db.allProducts(widget.storeId);
+                                          await PdfReceiptService.printReceipt(
+                                            sale: sale,
+                                            items: items,
+                                            products: products,
+                                          );
+                                        },
+                                      ),
+                                    ),
                                   ],
                                 ),
                               );

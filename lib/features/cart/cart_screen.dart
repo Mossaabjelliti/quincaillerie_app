@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
+import '../../services/pdf_receipt_service.dart';
 import 'cart_provider.dart';
 
 class CartScreen extends StatefulWidget {
@@ -93,6 +95,7 @@ class _CartScreenState extends State<CartScreen> {
       final db = context.read<AppDatabase>();
       final total = cart.totalAmount;
       final methodLabel = _getPaymentMethodLabel(_paymentMethod);
+      final checkoutItems = List<CartItem>.from(cart.items);
 
       final success = await cart.checkout(
         db: db,
@@ -104,14 +107,54 @@ class _CartScreenState extends State<CartScreen> {
       if (!mounted) return;
 
       if (success) {
+        // Fetch last created sale for print
+        final latestSales = await (db.select(db.sales)
+              ..where((s) => s.storeId.equals(widget.storeId))
+              ..orderBy([(s) => OrderingTerm.desc(s.createdAt)]))
+            .get();
+        final latestSale = latestSales.firstOrNull;
+
+        if (!mounted) return;
+
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
             icon: const Icon(Icons.check_circle, color: Colors.green, size: 56),
             title: const Text('Vente enregistrée !'),
-            content: Text(
-              'Montant total: ${total.toStringAsFixed(3)} TND\nMode de paiement: $methodLabel',
-              textAlign: TextAlign.center,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Montant total: ${total.toStringAsFixed(3)} TND\nMode de paiement: $methodLabel',
+                  textAlign: TextAlign.center,
+                ),
+                if (latestSale != null) ...[
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.print_outlined),
+                    label: const Text('Imprimer le reçu (PDF)'),
+                    onPressed: () async {
+                      final products = await db.allProducts(widget.storeId);
+                      final saleItems = checkoutItems
+                          .map((ci) => SaleItem(
+                                id: '',
+                                saleId: latestSale.id,
+                                productId: ci.product.id,
+                                quantity: ci.quantity,
+                                unitPrice: ci.product.sellPrice,
+                                subtotal: ci.subtotal,
+                              ))
+                          .toList();
+
+                      await PdfReceiptService.printReceipt(
+                        sale: latestSale,
+                        items: saleItems,
+                        products: products,
+                      );
+                    },
+                  ),
+                ],
+              ],
             ),
             actions: [
               ElevatedButton(
