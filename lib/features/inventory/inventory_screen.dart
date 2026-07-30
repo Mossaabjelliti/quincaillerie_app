@@ -51,6 +51,31 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
+  IconData _getCategoryIcon(String category) {
+    switch (category) {
+      case 'Vis & Boulons':
+        return Icons.hardware_outlined;
+      case 'Tuyauterie & Plomberie':
+        return Icons.plumbing_outlined;
+      case 'Électricité & Éclairage':
+        return Icons.flash_on_outlined;
+      case 'Peinture & Vernis':
+        return Icons.format_paint_outlined;
+      case 'Outillage':
+        return Icons.build_outlined;
+      case 'Serrurerie & Quincaillerie':
+        return Icons.lock_outline;
+      case 'Matériaux de construction':
+        return Icons.foundation_outlined;
+      case 'Jardinage & Arrosage':
+        return Icons.grass_outlined;
+      case 'Sanitaire':
+        return Icons.bathtub_outlined;
+      default:
+        return Icons.category_outlined;
+    }
+  }
+
   Future<void> _showEditProductDialog(Product product) async {
     final qtyController = TextEditingController(text: product.quantity.toString());
     final buyPriceController = TextEditingController(text: product.buyPrice.toStringAsFixed(3));
@@ -199,7 +224,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         title: const Text('Inventaire & Stock'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add_box_outlined),
+            icon: const Icon(Icons.add_circle_outline),
             tooltip: 'Nouveau produit',
             onPressed: () => Navigator.of(context).pushNamed('/add-product'),
           ),
@@ -207,9 +232,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
       ),
       body: Column(
         children: [
-          // Search Bar & Filter Controls
-          Padding(
-            padding: const EdgeInsets.all(12.0),
+          // Search & Filter Header
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             child: Column(
               children: [
                 TextField(
@@ -226,13 +252,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             },
                           )
                         : null,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
                   ),
                   onChanged: (val) => setState(() => _searchQuery = val.trim()),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Row(
                   children: [
                     FilterChip(
@@ -242,18 +265,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           Icon(
                             Icons.warning_amber_rounded,
                             size: 16,
-                            color: _showLowStockOnly ? Colors.orange.shade800 : null,
+                            color: _showLowStockOnly ? Colors.white : Colors.orange.shade800,
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: 6),
                           const Text('Stock bas uniquement'),
                         ],
                       ),
                       selected: _showLowStockOnly,
+                      selectedColor: Colors.orange.shade800,
                       onSelected: (val) => setState(() => _showLowStockOnly = val),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -262,6 +286,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(right: 6.0),
                         child: ChoiceChip(
+                          avatar: cat != 'Tous'
+                              ? Icon(
+                                  _getCategoryIcon(cat),
+                                  size: 16,
+                                  color: isSelected ? Colors.white : theme.colorScheme.primary,
+                                )
+                              : null,
                           label: Text(cat),
                           selected: isSelected,
                           onSelected: (selected) {
@@ -289,7 +320,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
                 final all = snapshot.data ?? [];
                 final filtered = all.where((p) {
-                  // Search query filter
                   if (_searchQuery.isNotEmpty) {
                     final q = _searchQuery.toLowerCase();
                     final matchName = p.name.toLowerCase().contains(q);
@@ -297,12 +327,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     if (!matchName && !matchCode) return false;
                   }
 
-                  // Category filter
                   if (_selectedCategory != 'Tous' && p.category != _selectedCategory) {
                     return false;
                   }
 
-                  // Low stock filter
                   if (_showLowStockOnly && p.quantity > p.lowStockThreshold) {
                     return false;
                   }
@@ -312,113 +340,166 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
                 if (filtered.isEmpty) {
                   return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.inventory_2_outlined,
-                          size: 64,
-                          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Aucun produit trouvé',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.inventory_2_outlined,
+                            size: 72,
+                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Aucun produit trouvé',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Essayez de modifier votre recherche ou ajoutez un nouveau produit.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 }
 
-                return ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                return ListView.builder(
+                  padding: const EdgeInsets.all(12),
                   itemCount: filtered.length,
-                  separatorBuilder: (ctx, i) => const Divider(height: 1),
                   itemBuilder: (ctx, i) {
                     final p = filtered[i];
                     final isLowStock = p.quantity <= p.lowStockThreshold;
                     final unitSuffix = _getUnitSuffix(p.unit);
+                    final catIcon = _getCategoryIcon(p.category);
 
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      title: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              p.name,
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor: theme.colorScheme.primaryContainer,
+                                  child: Icon(catIcon, color: theme.colorScheme.primary, size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        p.name,
+                                        style: theme.textTheme.titleMedium?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Code: ${p.barcode} • ${p.category}',
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: theme.colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (isLowStock)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange.shade100,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      'Stock bas',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange.shade900,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
-                          ),
-                          if (isLowStock)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              margin: const EdgeInsets.only(left: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade100,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                'Stock bas',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.orange.shade900,
+                            const Divider(height: 20),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'En stock',
+                                      style: theme.textTheme.labelSmall?.copyWith(
+                                        color: theme.colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${p.quantity} $unitSuffix',
+                                      style: theme.textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: isLowStock ? Colors.orange.shade900 : Colors.green.shade700,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      'Prix de vente',
+                                      style: theme.textTheme.labelSmall?.copyWith(
+                                        color: theme.colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${p.sellPrice.toStringAsFixed(3)} TND',
+                                      style: theme.textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: theme.colorScheme.primary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.qr_code, size: 20),
+                                      tooltip: 'Code QR',
+                                      onPressed: () {
+                                        Navigator.of(context).pushNamed(
+                                          '/qr-generator',
+                                          arguments: p,
+                                        );
+                                      },
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.edit_outlined, size: 20),
+                                      tooltip: 'Modifier',
+                                      onPressed: () => _showEditProductDialog(p),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                      tooltip: 'Supprimer',
+                                      onPressed: () => _deleteProduct(p),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
-                        ],
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 4),
-                          Text('Code: ${p.barcode} | Catégorie: ${p.category}'),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Text(
-                                'Stock: ${p.quantity} $unitSuffix',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: isLowStock ? Colors.orange.shade900 : Colors.green.shade800,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Prix: ${p.sellPrice.toStringAsFixed(3)} TND',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.qr_code),
-                            tooltip: 'Code QR',
-                            onPressed: () {
-                              Navigator.of(context).pushNamed(
-                                '/qr-generator',
-                                arguments: p,
-                              );
-                            },
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined),
-                            tooltip: 'Modifier',
-                            onPressed: () => _showEditProductDialog(p),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red),
-                            tooltip: 'Supprimer',
-                            onPressed: () => _deleteProduct(p),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     );
                   },

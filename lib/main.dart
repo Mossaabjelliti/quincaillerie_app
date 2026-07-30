@@ -6,6 +6,7 @@ import 'services/sync_service.dart';
 import 'features/scan/scan_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 
+import 'theme/app_theme.dart';
 import 'features/add_product/add_product_screen.dart';
 import 'features/cart/cart_provider.dart';
 import 'features/cart/cart_screen.dart';
@@ -44,10 +45,8 @@ class QuincaillerieApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Quincaillerie Stock',
-      theme: ThemeData(
-        colorSchemeSeed: Colors.blueGrey,
-        useMaterial3: true,
-      ),
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
       routes: {
         '/add-product': (context) {
           final barcode = ModalRoute.of(context)?.settings.arguments as String?;
