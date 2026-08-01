@@ -22,6 +22,7 @@ class CartScreen extends StatefulWidget {
 class _CartScreenState extends State<CartScreen> {
   PaymentMethod _paymentMethod = PaymentMethod.cash;
   bool _isProcessing = false;
+  bool _regularPricing = false;
 
   String _getUnitSuffix(ProductUnit unit) {
     switch (unit) {
@@ -88,6 +89,12 @@ class _CartScreenState extends State<CartScreen> {
   Future<void> _handleCheckout() async {
     final cart = context.read<CartProvider>();
     if (cart.isEmpty) return;
+    if (_paymentMethod == PaymentMethod.credit && cart.customerId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choisissez un client avant une vente à crédit.')),
+      );
+      return;
+    }
 
     setState(() => _isProcessing = true);
 
@@ -95,13 +102,15 @@ class _CartScreenState extends State<CartScreen> {
       final db = context.read<AppDatabase>();
       final total = cart.totalAmount;
       final methodLabel = _getPaymentMethodLabel(_paymentMethod);
-      final checkoutItems = List<CartItem>.from(cart.items);
 
       final success = await cart.checkout(
         db: db,
         storeId: widget.storeId,
         userId: widget.userId,
         paymentMethod: _paymentMethod,
+        customerId: cart.customerId,
+        customerName: cart.customerName,
+        priceMultiplier: _regularPricing ? 0.95 : 1.0,
       );
 
       if (!mounted) return;
@@ -116,6 +125,10 @@ class _CartScreenState extends State<CartScreen> {
 
         if (!mounted) return;
 
+        final saleItems = latestSale == null
+            ? <SaleItem>[]
+            : await (db.select(db.saleItems)..where((item) => item.saleId.equals(latestSale.id))).get();
+
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
@@ -128,6 +141,10 @@ class _CartScreenState extends State<CartScreen> {
                   'Montant total: ${total.toStringAsFixed(3)} TND\nMode de paiement: $methodLabel',
                   textAlign: TextAlign.center,
                 ),
+                if (cart.customerName != null) ...[
+                  const SizedBox(height: 8),
+                  Text('Client: ${cart.customerName}', textAlign: TextAlign.center),
+                ],
                 if (latestSale != null) ...[
                   const SizedBox(height: 16),
                   OutlinedButton.icon(
@@ -135,21 +152,11 @@ class _CartScreenState extends State<CartScreen> {
                     label: const Text('Imprimer le reçu (PDF)'),
                     onPressed: () async {
                       final products = await db.allProducts(widget.storeId);
-                      final saleItems = checkoutItems
-                          .map((ci) => SaleItem(
-                                id: '',
-                                saleId: latestSale.id,
-                                productId: ci.product.id,
-                                quantity: ci.quantity,
-                                unitPrice: ci.product.sellPrice,
-                                subtotal: ci.subtotal,
-                              ))
-                          .toList();
-
                       await PdfReceiptService.printReceipt(
                         sale: latestSale,
                         items: saleItems,
                         products: products,
+                        customerName: cart.customerName,
                       );
                     },
                   ),
@@ -255,6 +262,38 @@ class _CartScreenState extends State<CartScreen> {
             )
           : Column(
               children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.person_outline),
+                      title: Text(cart.customerName ?? 'Client passage'),
+                      subtitle: Text(
+                        _regularPricing ? 'Tarif régulier appliqué' : 'Tarif passage appliqué',
+                      ),
+                      trailing: Wrap(
+                        spacing: 8,
+                        children: [
+                          TextButton(
+                            onPressed: () => _showCustomerPicker(cart),
+                            child: Text(cart.customerId == null ? 'Choisir client' : 'Changer'),
+                          ),
+                          Switch(
+                            value: _regularPricing,
+                            onChanged: (value) {
+                              setState(() => _regularPricing = value);
+                              cart.setCustomer(
+                                customerId: cart.customerId,
+                                customerName: cart.customerName,
+                                priceMultiplier: value ? 0.95 : 1.0,
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: ListView.separated(
                     padding: const EdgeInsets.all(16.0),
@@ -301,7 +340,7 @@ class _CartScreenState extends State<CartScreen> {
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        '${item.product.sellPrice.toStringAsFixed(3)} TND / $unitSuffix',
+                                        '${(item.product.sellPrice * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND / $unitSuffix',
                                         style: theme.textTheme.bodySmall?.copyWith(
                                           color: theme.colorScheme.onSurfaceVariant,
                                         ),
@@ -360,7 +399,7 @@ class _CartScreenState extends State<CartScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Text(
-                                  '${item.subtotal.toStringAsFixed(3)} TND',
+                                  '${(item.subtotal * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND',
                                   style: theme.textTheme.titleSmall?.copyWith(
                                     fontWeight: FontWeight.bold,
                                     color: theme.colorScheme.primary,
@@ -474,4 +513,48 @@ class _CartScreenState extends State<CartScreen> {
             ),
     );
   }
+
+        Future<void> _showCustomerPicker(CartProvider cart) async {
+          final db = context.read<AppDatabase>();
+          final customers = await (db.select(db.customers)..where((c) => c.storeId.equals(widget.storeId))).get();
+
+          if (!mounted) return;
+
+          final selected = await showModalBottomSheet<Customer?>(
+            context: context,
+            isScrollControlled: true,
+            builder: (ctx) => SafeArea(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.person_off_outlined),
+                    title: const Text('Client passage'),
+                    onTap: () => Navigator.pop(ctx, null),
+                  ),
+                  ...customers.map(
+                    (customer) => ListTile(
+                      leading: const Icon(Icons.person),
+                      title: Text(customer.name),
+                      subtitle: Text(customer.phone.isNotEmpty ? customer.phone : 'Sans numéro'),
+                      onTap: () => Navigator.pop(ctx, customer),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+
+          if (!mounted) return;
+          if (selected == null) {
+            cart.setCustomer(customerId: null, customerName: null, priceMultiplier: _regularPricing ? 0.95 : 1.0);
+            return;
+          }
+
+          cart.setCustomer(
+            customerId: selected.id,
+            customerName: selected.name,
+            priceMultiplier: _regularPricing ? 0.95 : 1.0,
+          );
+        }
 }

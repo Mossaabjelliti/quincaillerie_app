@@ -18,6 +18,9 @@ class CartItem {
 /// Manages active shopping cart state and handles checkout database transactions.
 class CartProvider extends ChangeNotifier {
   final Map<String, CartItem> _items = {};
+  String? _customerId;
+  String? _customerName;
+  double _priceMultiplier = 1.0;
 
   List<CartItem> get items => _items.values.toList();
 
@@ -27,7 +30,11 @@ class CartProvider extends ChangeNotifier {
       _items.values.fold(0.0, (sum, item) => sum + item.quantity);
 
   double get totalAmount =>
-      _items.values.fold(0.0, (sum, item) => sum + item.subtotal);
+      _items.values.fold(0.0, (sum, item) => sum + (item.subtotal * _priceMultiplier));
+
+    String? get customerId => _customerId;
+    String? get customerName => _customerName;
+    double get priceMultiplier => _priceMultiplier;
 
   bool get isEmpty => _items.isEmpty;
 
@@ -63,6 +70,16 @@ class CartProvider extends ChangeNotifier {
 
   void clear() {
     _items.clear();
+    _customerId = null;
+    _customerName = null;
+    _priceMultiplier = 1.0;
+    notifyListeners();
+  }
+
+  void setCustomer({String? customerId, String? customerName, double priceMultiplier = 1.0}) {
+    _customerId = customerId;
+    _customerName = customerName;
+    _priceMultiplier = priceMultiplier;
     notifyListeners();
   }
 
@@ -76,14 +93,22 @@ class CartProvider extends ChangeNotifier {
     required String storeId,
     required String userId,
     required PaymentMethod paymentMethod,
+    String? customerId,
+    String? customerName,
+    double priceMultiplier = 1.0,
   }) async {
     if (_items.isEmpty) return false;
+    if (paymentMethod == PaymentMethod.credit && (customerId == null || customerId.isEmpty)) {
+      return false;
+    }
 
     const uuid = Uuid();
     final saleId = uuid.v4();
     final now = DateTime.now();
     final currentItems = List<CartItem>.from(_items.values);
-    final total = totalAmount;
+    final total = _items.values.fold<double>(0.0, (sum, item) => sum + (item.product.sellPrice * item.quantity * priceMultiplier));
+    final effectiveCustomerId = customerId ?? _customerId;
+    final effectiveCustomerName = customerName ?? _customerName;
 
     await db.transaction(() async {
       // 1. Insert Sale record
@@ -92,6 +117,7 @@ class CartProvider extends ChangeNotifier {
               id: saleId,
               storeId: storeId,
               userId: userId,
+              customerId: effectiveCustomerId != null ? Value(effectiveCustomerId) : const Value.absent(),
               total: total,
               paymentMethod: paymentMethod,
               createdAt: Value(now),
@@ -102,6 +128,7 @@ class CartProvider extends ChangeNotifier {
       for (final item in currentItems) {
         final saleItemId = uuid.v4();
         final movementId = uuid.v4();
+        final unitPrice = item.product.sellPrice * priceMultiplier;
 
         // 2. Insert SaleItem record
         await db.into(db.saleItems).insert(
@@ -110,8 +137,8 @@ class CartProvider extends ChangeNotifier {
                 saleId: saleId,
                 productId: item.product.id,
                 quantity: item.quantity,
-                unitPrice: item.product.sellPrice,
-                subtotal: item.subtotal,
+                unitPrice: unitPrice,
+                subtotal: unitPrice * item.quantity,
               ),
             );
 
@@ -141,6 +168,31 @@ class CartProvider extends ChangeNotifier {
             synced: const Value(false),
           ),
         );
+      }
+
+      if (paymentMethod == PaymentMethod.credit && effectiveCustomerId != null) {
+        final debtId = uuid.v4();
+        await db.into(db.customerDebts).insert(
+              CustomerDebtsCompanion.insert(
+                id: debtId,
+                storeId: storeId,
+                customerId: effectiveCustomerId,
+                saleId: Value(saleId),
+                totalAmount: total,
+                paidAmount: const Value(0.0),
+                remainingAmount: total,
+                dueDate: const Value.absent(),
+                status: const Value('UNPAID'),
+                createdAt: Value(now),
+                synced: const Value(false),
+              ),
+            );
+
+        if (effectiveCustomerName != null) {
+          await (db.update(db.sales)..where((row) => row.id.equals(saleId))).write(
+            SalesCompanion(customerId: Value(effectiveCustomerId)),
+          );
+        }
       }
     });
 

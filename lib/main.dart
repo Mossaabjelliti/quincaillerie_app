@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:workmanager/workmanager.dart';
+import 'core/app_config.dart';
 import 'data/local/database.dart';
+import 'services/sync_background.dart';
 import 'services/sync_service.dart';
 import 'core/auth/auth_service.dart';
 import 'core/auth/auth_provider.dart';
@@ -16,13 +19,25 @@ import 'features/cart/cart_screen.dart';
 import 'features/inventory/inventory_screen.dart';
 import 'features/sales/sales_screen.dart';
 import 'features/qr_generator/qr_generator_screen.dart';
+import 'features/customers/customer_debt_screen.dart';
+import 'features/suppliers/supplier_management_screen.dart';
+import 'features/sync/sync_logs_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Supabase.initialize(
-    url: 'https://rytkmzxmesjymyezpxmk.supabase.co',
-    publishableKey: 'sb_publishable_7XLhqMboA3mXLwSiR3BBdA_oO78Zt2e',
+    url: AppConfig.supabaseUrl,
+    publishableKey: AppConfig.supabaseAnonKey,
+  );
+
+  await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+  await Workmanager().registerPeriodicTask(
+    'daily-sync-unique',
+    dailySyncTask,
+    frequency: const Duration(hours: 24),
+    constraints: Constraints(networkType: NetworkType.connected),
+    existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
   );
 
   final db = AppDatabase();
@@ -48,6 +63,10 @@ Future<void> main() async {
 class QuincaillerieApp extends StatelessWidget {
   const QuincaillerieApp({super.key});
 
+  Widget _missingStoreScreen() {
+    return const StoreSelectionScreen();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -58,22 +77,31 @@ class QuincaillerieApp extends StatelessWidget {
         '/add-product': (context) {
           final session = context.read<AuthProvider>().session;
           final barcode = ModalRoute.of(context)?.settings.arguments as String?;
+          if (session?.hasActiveStore != true) {
+            return _missingStoreScreen();
+          }
           return AddProductScreen(
-            storeId: session?.currentStoreId ?? 'demo-store',
+            storeId: session!.currentStoreId!,
             initialBarcode: barcode,
           );
         },
         '/cart': (context) {
           final session = context.read<AuthProvider>().session;
+          if (session?.hasActiveStore != true) {
+            return _missingStoreScreen();
+          }
           return CartScreen(
-            storeId: session?.currentStoreId ?? 'demo-store',
-            userId: session?.userId ?? 'demo-user',
+            storeId: session!.currentStoreId!,
+            userId: session.userId,
           );
         },
         '/qr-generator': (context) {
           final product = ModalRoute.of(context)?.settings.arguments as Product?;
           return QrGeneratorScreen(product: product);
         },
+        '/customers': (context) => const CustomerDebtScreen(),
+        '/suppliers': (context) => const SupplierManagementScreen(),
+        '/sync-logs': (context) => const SyncLogsScreen(),
       },
       home: const AuthWrapper(),
     );
@@ -133,10 +161,13 @@ class _HomeShellState extends State<_HomeShell> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final session = auth.session;
+    final canManageStock = session?.canManageStock ?? false;
+    final canViewFinancials = session?.canViewFinancials ?? false;
     final screens = [
-      ScanScreen(storeId: widget.storeId, userId: widget.userId),
-      InventoryScreen(storeId: widget.storeId),
-      SalesScreen(storeId: widget.storeId),
+      ScanScreen(storeId: widget.storeId, userId: widget.userId, canManageStock: canManageStock),
+      InventoryScreen(storeId: widget.storeId, canManageStock: canManageStock),
+      SalesScreen(storeId: widget.storeId, canViewFinancials: canViewFinancials),
       DashboardScreen(storeId: widget.storeId),
     ];
 
@@ -144,6 +175,27 @@ class _HomeShellState extends State<_HomeShell> {
       appBar: AppBar(
         title: Text(auth.session?.currentStoreName ?? 'Quincaillerie'),
         actions: [
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              switch (value) {
+                case 'customers':
+                  Navigator.of(context).pushNamed('/customers');
+                  break;
+                case 'suppliers':
+                  Navigator.of(context).pushNamed('/suppliers');
+                  break;
+                case 'logs':
+                  Navigator.of(context).pushNamed('/sync-logs');
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'customers', child: Text('Clients & ardoises')),
+              if (auth.session?.canManageStock ?? false)
+                const PopupMenuItem(value: 'suppliers', child: Text('Fournisseurs')),
+              const PopupMenuItem(value: 'logs', child: Text('Journaux de sync')),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.swap_horiz_rounded),
             tooltip: 'Changer de magasin',

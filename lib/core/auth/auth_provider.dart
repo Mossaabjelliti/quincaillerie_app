@@ -64,18 +64,19 @@ class AuthProvider extends ChangeNotifier {
       try {
         membersRes = await authService.supabase
             .from('store_members')
-            .select('*, stores(*)')
+            .select('id, store_id, user_id, role, created_at, stores:stores(id, name, address, phone, owner_id, created_at)')
             .eq('user_id', userId);
       } catch (_) {}
 
       final fullName = profileRes?['full_name'] as String? ?? email.split('@').first;
       final phone = profileRes?['phone'] as String? ?? '';
-      final defaultRole = profileRes?['role'] as String? ?? 'owner';
+      final profileRole = profileRes?['role'] as String?;
 
       List<Store> loadedStores = [];
+      final storeRoles = <String, String>{};
       String? activeStoreId;
       String? activeStoreName;
-      String activeRole = defaultRole;
+      String activeRole = profileRole ?? 'cashier';
 
       if (membersRes != null && (membersRes as List).isNotEmpty) {
         for (final m in membersRes) {
@@ -91,21 +92,41 @@ class AuthProvider extends ChangeNotifier {
               synced: true,
             );
             loadedStores.add(st);
+            final role = m['role'] as String? ?? 'cashier';
+            storeRoles[st.id] = role;
             await db.into(db.stores).insertOnConflictUpdate(st);
+            await db.into(db.storeMembers).insertOnConflictUpdate(
+                  StoreMembersCompanion.insert(
+                    id: m['id']?.toString() ?? const Uuid().v4(),
+                    storeId: st.id,
+                    userId: userId,
+                    role: Value(role),
+                    synced: const Value(true),
+                  ),
+                );
           }
         }
       }
 
+      final localMembers = await (db.select(db.storeMembers)..where((m) => m.userId.equals(userId))).get();
       final localStores = await db.select(db.stores).get();
+      for (final member in localMembers) {
+        storeRoles[member.storeId] = member.role;
+      }
       for (final ls in localStores) {
         if (!loadedStores.any((s) => s.id == ls.id)) {
           loadedStores.add(ls);
         }
       }
 
-      if (loadedStores.isNotEmpty) {
-        activeStoreId = loadedStores.first.id;
-        activeStoreName = loadedStores.first.name;
+      if (loadedStores.isNotEmpty && storeRoles.isNotEmpty) {
+        final preferredStore = loadedStores.firstWhere(
+          (store) => storeRoles.containsKey(store.id),
+          orElse: () => loadedStores.first,
+        );
+        activeStoreId = preferredStore.id;
+        activeStoreName = preferredStore.name;
+        activeRole = storeRoles[preferredStore.id] ?? activeRole;
         _status = AuthStatus.authenticated;
       } else {
         _status = AuthStatus.noStore;
@@ -120,6 +141,7 @@ class AuthProvider extends ChangeNotifier {
         currentStoreName: activeStoreName,
         currentRole: activeRole,
         stores: loadedStores,
+        storeRoles: storeRoles,
       );
 
       await db.into(db.profiles).insertOnConflictUpdate(
@@ -127,25 +149,28 @@ class AuthProvider extends ChangeNotifier {
               id: userId,
               fullName: Value(fullName),
               phone: Value(phone),
-              role: Value(defaultRole),
+              role: Value(profileRole ?? activeRole),
               synced: const Value(true),
             ),
           );
     } catch (e) {
       final localProfiles = await (db.select(db.profiles)..where((p) => p.id.equals(userId))).get();
       final localStores = await db.select(db.stores).get();
+      final localMembers = await (db.select(db.storeMembers)..where((m) => m.userId.equals(userId))).get();
+      final localRoles = {for (final member in localMembers) member.storeId: member.role};
 
       _session = UserSession(
         userId: userId,
         userEmail: email,
         fullName: localProfiles.isNotEmpty ? localProfiles.first.fullName : email.split('@').first,
         phone: localProfiles.isNotEmpty ? localProfiles.first.phone : '',
-        currentStoreId: localStores.isNotEmpty ? localStores.first.id : null,
-        currentStoreName: localStores.isNotEmpty ? localStores.first.name : null,
-        currentRole: localProfiles.isNotEmpty ? localProfiles.first.role : 'owner',
+        currentStoreId: localStores.isNotEmpty && localRoles.isNotEmpty ? localStores.first.id : null,
+        currentStoreName: localStores.isNotEmpty && localRoles.isNotEmpty ? localStores.first.name : null,
+        currentRole: localProfiles.isNotEmpty ? localProfiles.first.role : 'cashier',
         stores: localStores,
+        storeRoles: localRoles,
       );
-      _status = localStores.isNotEmpty ? AuthStatus.authenticated : AuthStatus.noStore;
+      _status = (_session?.hasActiveStore == true) ? AuthStatus.authenticated : AuthStatus.noStore;
     }
   }
 
@@ -286,9 +311,11 @@ class AuthProvider extends ChangeNotifier {
   void selectStore(String storeId) {
     if (_session == null) return;
     final target = _session!.stores.firstWhere((s) => s.id == storeId, orElse: () => _session!.stores.first);
+    final role = _session!.roleForStore(target.id);
     _session = _session!.copyWith(
       currentStoreId: target.id,
       currentStoreName: target.name,
+      currentRole: role,
     );
     _status = AuthStatus.authenticated;
     notifyListeners();

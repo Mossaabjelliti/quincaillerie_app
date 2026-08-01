@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../data/local/database.dart';
+import '../../services/pdf_receipt_service.dart';
 
 class QrGeneratorScreen extends StatelessWidget {
   final Product? product;
@@ -69,6 +70,18 @@ class QrGeneratorScreen extends StatelessWidget {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.print_outlined),
+                        label: const Text('Imprimer l’étiquette'),
+                        onPressed: () async {
+                          await PdfReceiptService.printQrLabel(
+                            data: barcodeData,
+                            title: productName,
+                            subtitle: product == null ? '' : '${product!.sellPrice.toStringAsFixed(3)} TND',
+                          );
+                        },
                       ),
                     ],
                   ),

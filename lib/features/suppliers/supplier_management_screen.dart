@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/inventory/stock_engine.dart';
 
 class SupplierManagementScreen extends StatefulWidget {
   const SupplierManagementScreen({super.key});
@@ -87,9 +88,9 @@ class _SupplierManagementScreenState extends State<SupplierManagementScreen> {
                           id: uuid.v4(),
                           storeId: storeId,
                           name: _nameController.text.trim(),
-                          phone: Value(_phoneController.text.trim()),
-                          address: Value(_addressController.text.trim()),
-                          email: Value(_emailController.text.trim()),
+                          phone: _phoneController.text.trim().isEmpty ? const Value.absent() : Value(_phoneController.text.trim()),
+                          address: _addressController.text.trim().isEmpty ? const Value.absent() : Value(_addressController.text.trim()),
+                          email: _emailController.text.trim().isEmpty ? const Value.absent() : Value(_emailController.text.trim()),
                           synced: const Value(false),
                         ),
                       );
@@ -106,6 +107,114 @@ class _SupplierManagementScreenState extends State<SupplierManagementScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 child: const Text('Enregistrer Fournisseur'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openReceiveStockModal(Supplier supplier) async {
+    final barcodeController = TextEditingController();
+    final quantityController = TextEditingController(text: '1');
+    final buyPriceController = TextEditingController();
+    final noteController = TextEditingController();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            top: 24,
+            left: 24,
+            right: 24,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Réception marchandise - ${supplier.name}', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              TextField(controller: barcodeController, decoration: const InputDecoration(labelText: 'Code-barres produit', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: quantityController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Quantité reçue', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: buyPriceController, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Prix d’achat unitaire', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: noteController, decoration: const InputDecoration(labelText: 'Remarque', border: OutlineInputBorder())),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () async {
+                  final db = context.read<AppDatabase>();
+                  final storeId = context.read<AuthProvider>().session?.currentStoreId ?? '';
+                  final product = await (db.select(db.products)
+                        ..where((p) => p.storeId.equals(storeId) & p.barcode.equals(barcodeController.text.trim())))
+                      .getSingleOrNull();
+                  if (product == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produit introuvable pour ce code-barres.')));
+                    return;
+                  }
+
+                  final quantity = double.tryParse(quantityController.text.replaceAll(',', '.')) ?? 0;
+                  if (quantity <= 0) return;
+                  final buyPrice = double.tryParse(buyPriceController.text.replaceAll(',', '.')) ?? product.buyPrice;
+                  const uuid = Uuid();
+                  final now = DateTime.now();
+                  final total = buyPrice * quantity;
+                  final purchaseId = uuid.v4();
+
+                  await db.into(db.purchases).insert(
+                        PurchasesCompanion.insert(
+                          id: purchaseId,
+                          storeId: storeId,
+                          supplierId: supplier.id,
+                          createdBy: context.read<AuthProvider>().session?.userId ?? '',
+                          total: total,
+                          paymentStatus: const Value('RECEIVED'),
+                          createdAt: Value(now),
+                          synced: const Value(false),
+                        ),
+                      );
+
+                  await db.into(db.purchaseItems).insert(
+                        PurchaseItemsCompanion.insert(
+                          id: uuid.v4(),
+                          purchaseId: purchaseId,
+                          productId: product.id,
+                          quantity: quantity,
+                          buyPrice: buyPrice,
+                          subtotal: total,
+                        ),
+                      );
+
+                  await StockEngine(db: db).recordMovement(
+                    storeId: storeId,
+                    productId: product.id,
+                    userId: context.read<AuthProvider>().session?.userId ?? '',
+                    type: MovementType.purchase,
+                    quantity: quantity,
+                    deviceId: 'supplier-receiving',
+                    note: '${noteController.text.trim()} | Fournisseur: ${supplier.name}',
+                  );
+
+                  await (db.update(db.products)..where((p) => p.id.equals(product.id))).write(
+                    ProductsCompanion(
+                      buyPrice: Value(buyPrice),
+                      updatedAt: Value(now),
+                      synced: const Value(false),
+                    ),
+                  );
+
+                  if (mounted) Navigator.pop(context);
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.amber.shade700, foregroundColor: Colors.white),
+                child: const Text('Enregistrer la réception'),
               ),
             ],
           ),
@@ -170,11 +279,9 @@ class _SupplierManagementScreenState extends State<SupplierManagementScreen> {
                   ),
                   trailing: IconButton(
                     icon: const Icon(Icons.add_shopping_cart_rounded, color: Colors.amber),
-                    tooltip: 'Nouvel Achat / Bon de Commande',
+                    tooltip: 'Réception marchandise',
                     onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Nouveau Bon d\'Achat pour ${sup.name}')),
-                      );
+                      _openReceiveStockModal(sup);
                     },
                   ),
                 ),

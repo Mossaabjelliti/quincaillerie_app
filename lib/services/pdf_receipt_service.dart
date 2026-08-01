@@ -80,6 +80,47 @@ class PdfReceiptService {
     );
   }
 
+  static Future<void> printQrLabel({
+    required String data,
+    required String title,
+    String subtitle = '',
+  }) async {
+    final doc = pw.Document();
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: const PdfPageFormat(60 * PdfPageFormat.mm, 40 * PdfPageFormat.mm),
+        margin: const pw.EdgeInsets.all(6),
+        build: (context) {
+          return pw.Column(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            children: [
+              pw.Text(title, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              if (subtitle.isNotEmpty) ...[
+                pw.SizedBox(height: 2),
+                pw.Text(subtitle, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7)),
+              ],
+              pw.SizedBox(height: 4),
+              pw.BarcodeWidget(
+                barcode: pw.Barcode.qrCode(),
+                data: data,
+                width: 80,
+                height: 80,
+              ),
+              pw.SizedBox(height: 2),
+              pw.Text(data, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7)),
+            ],
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (format) async => doc.save(),
+      name: 'Label_${data}.pdf',
+    );
+  }
+
   /// Builds PDF byte array for thermal 80mm format
   static Future<Uint8List> buildReceiptPdfBytes({
     required Sale sale,

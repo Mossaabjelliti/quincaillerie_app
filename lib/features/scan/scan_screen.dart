@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
@@ -6,46 +7,69 @@ import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../cart/cart_provider.dart';
 
-/// The core daily workflow screen: scan a product's code, then log
-/// stock IN (received from supplier) or OUT (sold).
-///
-/// Works with either the phone camera (mobile_scanner) OR a Bluetooth/USB
-/// barcode gun in "keyboard wedge" mode — a physical scanner just types
-/// the barcode into a focused TextField, so this screen also exposes a
-/// manual/hardware-input fallback further down (see ManualEntryField).
 class ScanScreen extends StatefulWidget {
   final String storeId;
   final String userId;
+  final bool canManageStock;
 
-  const ScanScreen({super.key, required this.storeId, required this.userId});
+  const ScanScreen({super.key, required this.storeId, required this.userId, required this.canManageStock});
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
 
 class _ScanScreenState extends State<ScanScreen> {
-  final MobileScannerController _controller = MobileScannerController();
-  bool _handling = false; // debounce: avoid double-firing on the same code
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+    facing: CameraFacing.back,
+    torchEnabled: false,
+  );
 
-  Future<void> _handleBarcode(String code) async {
-    if (_handling) return;
+  bool _handling = false;
+  bool _isTorchOn = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleBarcode(String rawCode) async {
+    final code = rawCode.trim();
+    if (code.isEmpty || _handling) return;
+
     setState(() => _handling = true);
 
-    final db = context.read<AppDatabase>();
-    final product = await (db.select(db.products)
-          ..where((p) => (p.barcode.equals(code)) & (p.storeId.equals(widget.storeId))))
-        .getSingleOrNull();
+    try {
+      final db = context.read<AppDatabase>();
+      final product = await (db.select(db.products)
+            ..where((p) => (p.barcode.equals(code)) & (p.storeId.equals(widget.storeId))))
+          .getSingleOrNull();
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (product == null) {
-      // Unknown code -> offer to create a new product on the spot.
-      await Navigator.of(context).pushNamed('/add-product', arguments: code);
-    } else {
-      await _showMovementDialog(product);
+      if (product == null) {
+        if (widget.canManageStock) {
+          await Navigator.of(context).pushNamed('/add-product', arguments: code);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Produit inconnu. Demandez à un responsable de l’ajouter.')),
+          );
+        }
+      } else {
+        await _showMovementDialog(product);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur de scan: ${e.toString()}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _handling = false);
+      }
     }
-
-    setState(() => _handling = false);
   }
 
   Future<void> _showMovementDialog(Product product) async {
@@ -53,25 +77,62 @@ class _ScanScreenState extends State<ScanScreen> {
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(
-          left: 16, right: 16, top: 16,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          left: 20, right: 20, top: 20,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              product.name,
-              style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Stock disponible: ${product.quantity} ${product.unit.name} | Prix: ${product.sellPrice.toStringAsFixed(3)} TND',
-              style: Theme.of(ctx).textTheme.bodyMedium,
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade100,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.qr_code_2_rounded, color: Colors.amber.shade900),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        product.name,
+                        style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        'Code: ${product.barcode} | Unit: ${product.unit.name}',
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blueGrey.shade50,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Stock: ${product.quantity} ${product.unit.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('${product.sellPrice.toStringAsFixed(3)} TND', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green.shade800, fontSize: 16)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: qtyController,
               autofocus: true,
@@ -79,51 +140,59 @@ class _ScanScreenState extends State<ScanScreen> {
               decoration: InputDecoration(
                 labelText: 'Quantité (${product.unit.name})',
                 border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.numbers_rounded),
               ),
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              icon: const Icon(Icons.add_shopping_cart),
-              label: const Text('Ajouter au panier (Vente)', style: TextStyle(fontWeight: FontWeight.bold)),
+              icon: const Icon(Icons.add_shopping_cart_rounded),
+              label: const Text('Ajouter au panier (Vente)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.primary,
-                foregroundColor: Theme.of(ctx).colorScheme.onPrimary,
+                backgroundColor: Colors.amber.shade700,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: () => Navigator.pop(ctx, {
                 'action': 'cart',
                 'qty': double.tryParse(qtyController.text) ?? 1.0,
               }),
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.call_received),
-                    label: const Text('Entrée (achat)'),
-                    onPressed: () => Navigator.pop(ctx, {
-                      'action': 'movement',
-                      'type': MovementType.stockIn,
-                      'qty': double.tryParse(qtyController.text) ?? 1.0,
-                    }),
+            const SizedBox(height: 10),
+            if (widget.canManageStock) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.call_received),
+                      label: const Text('Entrée (achat)'),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                      onPressed: () => Navigator.pop(ctx, {
+                        'action': 'movement',
+                        'type': MovementType.stockIn,
+                        'qty': double.tryParse(qtyController.text) ?? 1.0,
+                      }),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.call_made),
-                    label: const Text('Sortie directe'),
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.orange.shade800),
-                    onPressed: () => Navigator.pop(ctx, {
-                      'action': 'movement',
-                      'type': MovementType.stockOut,
-                      'qty': double.tryParse(qtyController.text) ?? 1.0,
-                    }),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.call_made),
+                      label: const Text('Sortie directe'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange.shade800,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () => Navigator.pop(ctx, {
+                        'action': 'movement',
+                        'type': MovementType.stockOut,
+                        'qty': double.tryParse(qtyController.text) ?? 1.0,
+                      }),
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -137,9 +206,9 @@ class _ScanScreenState extends State<ScanScreen> {
         context.read<CartProvider>().addItem(product, qty);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${product.name} ($qty ${product.unit.name}) ajouté au panier'),
+            content: Text('${product.name} ($qty) ajouté au panier'),
             action: SnackBarAction(
-              label: 'Voir panier',
+              label: 'Panier',
               onPressed: () => Navigator.of(context).pushNamed('/cart'),
             ),
           ),
@@ -179,7 +248,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${product.name}: stock mis à jour ($newQty)')),
+      SnackBar(content: Text('${product.name}: Nouveau stock ($newQty)')),
     );
   }
 
@@ -188,13 +257,13 @@ class _ScanScreenState extends State<ScanScreen> {
     final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Saisie manuelle du code-barres'),
+        title: const Text('Saisie manuelle / Douchette Scanner'),
         content: TextField(
           controller: controller,
           autofocus: true,
           decoration: const InputDecoration(
             labelText: 'Code-barres / Référence',
-            hintText: 'ex: 123456789',
+            hintText: 'ex: 619123456789',
             prefixIcon: Icon(Icons.qr_code),
             border: OutlineInputBorder(),
           ),
@@ -215,6 +284,7 @@ class _ScanScreenState extends State<ScanScreen> {
                 Navigator.pop(ctx, controller.text.trim());
               }
             },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber.shade700, foregroundColor: Colors.white),
             child: const Text('Valider'),
           ),
         ],
@@ -233,52 +303,30 @@ class _ScanScreenState extends State<ScanScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scanner'),
+        title: const Text('Scanner de Code-barres'),
         actions: [
           IconButton(
+            icon: Icon(_isTorchOn ? Icons.flash_on : Icons.flash_off),
+            tooltip: 'Flash',
+            onPressed: () async {
+              await _controller.toggleTorch();
+              setState(() => _isTorchOn = !_isTorchOn);
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.cameraswitch_outlined),
+            tooltip: 'Changer de caméra',
+            onPressed: () => _controller.switchCamera(),
+          ),
+          IconButton(
             icon: const Icon(Icons.keyboard),
-            tooltip: 'Saisie manuelle du code',
+            tooltip: 'Saisie manuelle',
             onPressed: _showManualEntryDialog,
           ),
           IconButton(
-            icon: const Icon(Icons.add),
+            icon: const Icon(Icons.add_box_outlined),
             tooltip: 'Nouveau produit',
-            onPressed: () => Navigator.of(context).pushNamed('/add-product'),
-          ),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.shopping_cart_outlined),
-                tooltip: 'Panier',
-                onPressed: () => Navigator.of(context).pushNamed('/cart'),
-              ),
-              if (cart.itemCount > 0)
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    child: Text(
-                      '${cart.itemCount}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
+            onPressed: widget.canManageStock ? () => Navigator.of(context).pushNamed('/add-product') : null,
           ),
         ],
       ),
@@ -287,10 +335,73 @@ class _ScanScreenState extends State<ScanScreen> {
           MobileScanner(
             controller: _controller,
             onDetect: (capture) {
-              final barcode = capture.barcodes.firstOrNull?.rawValue;
-              if (barcode != null) _handleBarcode(barcode);
+              final barcodes = capture.barcodes;
+              if (barcodes.isNotEmpty) {
+                final code = barcodes.first.rawValue ?? barcodes.first.displayValue;
+                if (code != null && code.isNotEmpty) {
+                  _handleBarcode(code);
+                }
+              }
+            },
+            errorBuilder: (context, error, child) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.camera_alt_outlined, size: 64, color: Colors.grey.shade400),
+                      const SizedBox(height: 16),
+                      Text(
+                        kIsWeb
+                            ? 'Caméra indisponible sur ce navigateur ou autorisation refusée.'
+                            : 'Impossible d\'accéder à la caméra. Vérifiez les autorisations.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 16, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: _showManualEntryDialog,
+                        icon: const Icon(Icons.keyboard),
+                        label: const Text('Utiliser la saisie manuelle / Douchette'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.amber.shade700,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
             },
           ),
+
+          // Scanning Reticle Overlay
+          Center(
+            child: Container(
+              width: 260,
+              height: 180,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.amber, width: 3),
+                borderRadius: BorderRadius.circular(16),
+                color: Colors.transparent,
+              ),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.qr_code_scanner, color: Colors.amber, size: 40),
+                  SizedBox(height: 8),
+                  Text(
+                    'Placez le code-barres ici',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, backgroundColor: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Cart Floating Footer
           if (cart.itemCount > 0)
             Positioned(
               left: 16,
@@ -354,11 +465,5 @@ class _ScanScreenState extends State<ScanScreen> {
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 }

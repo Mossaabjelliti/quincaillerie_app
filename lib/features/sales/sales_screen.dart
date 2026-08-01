@@ -7,8 +7,9 @@ import '../../services/pdf_receipt_service.dart';
 
 class SalesScreen extends StatefulWidget {
   final String storeId;
+  final bool canViewFinancials;
 
-  const SalesScreen({super.key, required this.storeId});
+  const SalesScreen({super.key, required this.storeId, required this.canViewFinancials});
 
   @override
   State<SalesScreen> createState() => _SalesScreenState();
@@ -41,6 +42,18 @@ class _SalesScreenState extends State<SalesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.canViewFinancials) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Historique des ventes')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('Accès restreint: votre rôle ne permet pas de consulter les ventes.'),
+          ),
+        ),
+      );
+    }
+
     final db = context.watch<AppDatabase>();
     final theme = Theme.of(context);
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');

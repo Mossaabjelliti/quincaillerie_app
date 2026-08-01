@@ -150,6 +150,11 @@ class _CustomerDebtScreenState extends State<CustomerDebtScreen> {
 
                   final db = context.read<AppDatabase>();
                   final storeId = context.read<AuthProvider>().session?.currentStoreId ?? '';
+                  final debts = await (db.select(db.customerDebts)
+                        ..where((d) => d.customerId.equals(customer.id) & d.storeId.equals(storeId) & d.remainingAmount.isBiggerThanValue(0)))
+                      .get();
+                  final activeDebt = debts.isNotEmpty ? debts.first : null;
+                  if (activeDebt == null) return;
                   const uuid = Uuid();
 
                   // Record payment
@@ -157,13 +162,23 @@ class _CustomerDebtScreenState extends State<CustomerDebtScreen> {
                         DebtPaymentsCompanion.insert(
                           id: uuid.v4(),
                           storeId: storeId,
-                          debtId: uuid.v4(), // Generic payment reference
+                          debtId: activeDebt.id,
                           customerId: customer.id,
                           amount: amount,
                           paymentMethod: const Value('cash'),
                           synced: const Value(false),
                         ),
                       );
+
+                  final newRemaining = (activeDebt.remainingAmount - amount).clamp(0, double.infinity).toDouble();
+                  await (db.update(db.customerDebts)..where((d) => d.id.equals(activeDebt.id))).write(
+                    CustomerDebtsCompanion(
+                      paidAmount: Value(activeDebt.paidAmount + amount),
+                      remainingAmount: Value(newRemaining),
+                      status: Value(newRemaining <= 0 ? 'PAID' : 'PARTIAL'),
+                      synced: const Value(false),
+                    ),
+                  );
 
                   _paymentAmountController.clear();
                   if (mounted) {
@@ -267,7 +282,7 @@ class _CustomerDebtScreenState extends State<CustomerDebtScreen> {
                           ),
                         ],
                       ),
-                      onTap: () => _openPaymentModal(context, c, totalDebt),
+                      onTap: totalDebt > 0 ? () => _openPaymentModal(context, c, totalDebt) : null,
                     ),
                   );
                 },

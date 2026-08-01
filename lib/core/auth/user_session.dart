@@ -9,6 +9,7 @@ class UserSession {
   final String? currentStoreName;
   final String currentRole; // 'owner' | 'manager' | 'cashier' | 'stock_manager'
   final List<Store> stores;
+  final Map<String, String> storeRoles;
 
   const UserSession({
     required this.userId,
@@ -19,6 +20,7 @@ class UserSession {
     this.currentStoreName,
     required this.currentRole,
     required this.stores,
+    this.storeRoles = const {},
   });
 
   bool get hasActiveStore => currentStoreId != null && currentStoreId!.isNotEmpty;
@@ -29,6 +31,8 @@ class UserSession {
   bool get canPerformSales => true; // All roles can process sales
   bool get canViewFinancials => isOwner || isManager;
 
+  String roleForStore(String storeId) => storeRoles[storeId] ?? currentRole;
+
   UserSession copyWith({
     String? userId,
     String? userEmail,
@@ -38,6 +42,7 @@ class UserSession {
     String? currentStoreName,
     String? currentRole,
     List<Store>? stores,
+    Map<String, String>? storeRoles,
   }) {
     return UserSession(
       userId: userId ?? this.userId,
@@ -48,6 +53,7 @@ class UserSession {
       currentStoreName: currentStoreName ?? this.currentStoreName,
       currentRole: currentRole ?? this.currentRole,
       stores: stores ?? this.stores,
+      storeRoles: storeRoles ?? this.storeRoles,
     );
   }
 }

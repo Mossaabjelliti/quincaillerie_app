@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:drift/drift.dart' hide Column;
+import 'package:uuid/uuid.dart';
 import '../../data/local/database.dart';
+import '../../core/inventory/stock_engine.dart';
+import '../../core/auth/auth_provider.dart';
+import 'unit_variant_dialog.dart';
 
 class InventoryScreen extends StatefulWidget {
   final String storeId;
+  final bool canManageStock;
 
-  const InventoryScreen({super.key, required this.storeId});
+  const InventoryScreen({super.key, required this.storeId, required this.canManageStock});
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -185,6 +190,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _deleteProduct(Product product) async {
+    if (!widget.canManageStock) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -214,6 +220,72 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
+  Future<void> _showPhysicalCountDialog(Product product) async {
+    final countController = TextEditingController(text: product.quantity.toString());
+    final reasonController = TextEditingController(text: 'Comptage physique');
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Comptage physique — ${product.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: countController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Quantité réelle',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              decoration: const InputDecoration(
+                labelText: 'Motif / remarque',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != true || !mounted) return;
+
+    final actualQty = double.tryParse(countController.text.replaceAll(',', '.'));
+    if (actualQty == null) return;
+
+    final db = context.read<AppDatabase>();
+    final userId = context.read<AuthProvider>().session?.userId ?? '';
+    final engine = StockEngine(db: db);
+    final delta = actualQty - product.quantity;
+    if (delta == 0) return;
+
+    await engine.recordMovement(
+      storeId: widget.storeId,
+      productId: product.id,
+      userId: userId,
+      type: MovementType.adjustment,
+      quantity: delta,
+      deviceId: const Uuid().v4(),
+      note: '${reasonController.text.trim()} | réel: $actualQty | système: ${product.quantity}',
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Stock réconcilié: ${product.name} = $actualQty')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final db = context.watch<AppDatabase>();
@@ -223,11 +295,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(
         title: const Text('Inventaire & Stock'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Nouveau produit',
-            onPressed: () => Navigator.of(context).pushNamed('/add-product'),
-          ),
+          if (widget.canManageStock)
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: 'Nouveau produit',
+              onPressed: () => Navigator.of(context).pushNamed('/add-product'),
+            ),
         ],
       ),
       body: Column(
@@ -472,7 +545,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                     ),
                                   ],
                                 ),
-                                Row(
+                                Wrap(
+                                  alignment: WrapAlignment.end,
+                                  spacing: 0,
                                   children: [
                                     IconButton(
                                       icon: const Icon(Icons.qr_code, size: 20),
@@ -485,15 +560,33 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                       },
                                     ),
                                     IconButton(
-                                      icon: const Icon(Icons.edit_outlined, size: 20),
-                                      tooltip: 'Modifier',
-                                      onPressed: () => _showEditProductDialog(p),
+                                      icon: const Icon(Icons.qr_code_scanner_outlined, size: 20),
+                                      tooltip: 'Unités & variantes',
+                                      onPressed: widget.canManageStock
+                                          ? () => showDialog(
+                                                context: context,
+                                                builder: (_) => UnitVariantDialog(product: p),
+                                              )
+                                          : null,
                                     ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                                      tooltip: 'Supprimer',
-                                      onPressed: () => _deleteProduct(p),
-                                    ),
+                                    if (widget.canManageStock)
+                                      IconButton(
+                                        icon: const Icon(Icons.fact_check_outlined, size: 20),
+                                        tooltip: 'Comptage physique',
+                                        onPressed: () => _showPhysicalCountDialog(p),
+                                      ),
+                                    if (widget.canManageStock)
+                                      IconButton(
+                                        icon: const Icon(Icons.edit_outlined, size: 20),
+                                        tooltip: 'Modifier',
+                                        onPressed: () => _showEditProductDialog(p),
+                                      ),
+                                    if (widget.canManageStock)
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                        tooltip: 'Supprimer',
+                                        onPressed: () => _deleteProduct(p),
+                                      ),
                                   ],
                                 ),
                               ],

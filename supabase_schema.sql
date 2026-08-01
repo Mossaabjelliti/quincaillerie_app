@@ -1,5 +1,5 @@
--- Run this in Supabase Dashboard > SQL Editor when you set up your project.
--- Mirrors the local Drift schema so sync is a straight upsert, no mapping layer.
+-- LEGACY FILE: do not deploy this script.
+-- Use supabase_rls.sql instead. This file is kept only for historical reference.
 
 create table stores (
   id uuid primary key default gen_random_uuid(),

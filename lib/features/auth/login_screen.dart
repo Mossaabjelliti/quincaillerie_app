@@ -86,7 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.amber.withOpacity(0.3),
+                        color: Colors.amber.withValues(alpha: 0.3),
                         blurRadius: 16,
                         offset: const Offset(0, 8),
                       ),
@@ -119,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Form Card
                 Card(
                   elevation: 4,
-                  shadowColor: Colors.black.withOpacity(0.08),
+                  shadowColor: Colors.black.withValues(alpha: 0.08),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
