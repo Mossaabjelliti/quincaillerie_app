@@ -130,7 +130,8 @@ class CartProvider extends ChangeNotifier {
 
       for (final item in currentItems) {
         final saleItemId = uuid.v4();
-        final movementId = uuid.v4();
+        // Shared by local and remote transaction processing for idempotency.
+        final movementId = '$saleId:${item.product.id}';
         final unitPrice = item.product.sellPrice * priceMultiplier;
 
         // 2. Insert SaleItem record

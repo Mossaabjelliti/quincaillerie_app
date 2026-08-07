@@ -199,6 +199,7 @@ class _SupplierManagementScreenState extends State<SupplierManagementScreen> {
                     userId: context.read<AuthProvider>().session?.userId ?? '',
                     type: MovementType.purchase,
                     quantity: quantity,
+                    movementId: '$purchaseId:${product.id}',
                     note: '${noteController.text.trim()} | Fournisseur: ${supplier.name}',
                   );
 

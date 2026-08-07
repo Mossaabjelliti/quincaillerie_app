@@ -15,11 +15,12 @@ class StockEngine {
     required String userId,
     required MovementType type,
     required double quantity,
+    String? movementId,
     String? deviceId,
     String note = '',
   }) async {
     const uuid = Uuid();
-    final movementId = uuid.v4();
+    final resolvedMovementId = movementId ?? uuid.v4();
     final now = DateTime.now();
     final resolvedDeviceId = (deviceId == null || deviceId.isEmpty)
         ? await DeviceIdentity.id
@@ -28,7 +29,7 @@ class StockEngine {
     await db.transaction(() async {
       await db.into(db.stockMovements).insert(
             StockMovementsCompanion.insert(
-              id: movementId,
+              id: resolvedMovementId,
               productId: productId,
               storeId: storeId,
               userId: userId,
@@ -43,7 +44,7 @@ class StockEngine {
       await reconcileProductCache(storeId, productId);
     });
 
-    return movementId;
+    return resolvedMovementId;
   }
 
   /// Calculates real-time stock balance strictly by aggregating all movements.

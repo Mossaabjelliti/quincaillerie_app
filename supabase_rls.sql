@@ -321,3 +321,185 @@ create policy "Store members product units policy" on public.product_units
 -- Product Variants
 create policy "Store members product variants policy" on public.product_variants
   for all using (public.is_store_member(store_id)) with check (public.is_store_member(store_id));
+
+-- ==========================================================================
+-- ATOMIC BUSINESS TRANSACTIONS
+-- ==========================================================================
+-- These RPCs are deliberately the only cloud write path for newly created
+-- sales and supplier receipts. They are idempotent by document id, validate
+-- store access from auth.uid(), and commit all related rows together.
+
+create or replace function public.checkout_sale(
+  p_sale jsonb,
+  p_items jsonb,
+  p_debt jsonb default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_store_id text := p_sale->>'store_id';
+  v_sale_id text := p_sale->>'id';
+  v_line jsonb;
+  v_product_id text;
+  v_quantity numeric;
+  v_stock numeric;
+  v_total numeric := 0;
+begin
+  if v_store_id is null or v_sale_id is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'Invalid sale payload';
+  end if;
+  if not public.is_store_member(v_store_id) then
+    raise exception 'Not authorized for store %', v_store_id using errcode = '42501';
+  end if;
+
+  -- A previous successful call committed the entire document, so a retry is safe.
+  if exists (select 1 from public.sales where id = v_sale_id) then
+    return jsonb_build_object('id', v_sale_id, 'status', 'already_committed');
+  end if;
+
+  -- Lock the relevant catalog rows before calculating balances, preventing two
+  -- terminals from accepting the same last unit concurrently.
+  perform 1
+  from public.products
+  where store_id = v_store_id
+    and id in (select value->>'product_id' from jsonb_array_elements(p_items))
+  for update;
+
+  for v_line in select value from jsonb_array_elements(p_items)
+  loop
+    v_product_id := v_line->>'product_id';
+    v_quantity := (v_line->>'quantity')::numeric;
+    if v_product_id is null or v_quantity is null or v_quantity <= 0 then
+      raise exception 'Invalid sale item';
+    end if;
+
+    select coalesce(sum(case
+      when type in ('PURCHASE', 'RETURN', 'stockIn') then quantity
+      when type in ('SALE', 'stockOut') then -quantity
+      when type = 'ADJUSTMENT' then quantity
+      else 0
+    end), 0)
+    into v_stock
+    from public.stock_movements
+    where store_id = v_store_id and product_id = v_product_id;
+
+    if v_stock < v_quantity then
+      raise exception 'Insufficient stock for product %', v_product_id using errcode = 'P0001';
+    end if;
+
+    if (v_line->>'subtotal')::numeric <> (v_line->>'unit_price')::numeric * v_quantity then
+      raise exception 'Invalid sale item subtotal';
+    end if;
+    v_total := v_total + (v_line->>'subtotal')::numeric;
+  end loop;
+
+  if v_total <> (p_sale->>'total')::numeric then
+    raise exception 'Sale total does not match its items';
+  end if;
+
+  insert into public.sales (id, store_id, user_id, customer_id, total, payment_method, created_at)
+  values (
+    v_sale_id, v_store_id, auth.uid()::text, coalesce(p_sale->>'customer_id', ''),
+    v_total, p_sale->>'payment_method', coalesce((p_sale->>'created_at')::timestamptz, now())
+  );
+
+  for v_line in select value from jsonb_array_elements(p_items)
+  loop
+    insert into public.sale_items (id, sale_id, product_id, quantity, unit_price, subtotal)
+    values (
+      v_line->>'id', v_sale_id, v_line->>'product_id', (v_line->>'quantity')::numeric,
+      (v_line->>'unit_price')::numeric, (v_line->>'subtotal')::numeric
+    );
+    insert into public.stock_movements (id, product_id, store_id, user_id, device_id, type, quantity, note, created_at)
+    values (
+      v_sale_id || ':' || (v_line->>'product_id'), v_line->>'product_id', v_store_id,
+      auth.uid()::text, coalesce(p_sale->>'device_id', ''), 'SALE', (v_line->>'quantity')::numeric,
+      'Vente #' || left(v_sale_id, 8), coalesce((p_sale->>'created_at')::timestamptz, now())
+    );
+  end loop;
+
+  if p_debt is not null then
+    if p_sale->>'payment_method' <> 'credit' then raise exception 'Debt requires credit payment'; end if;
+    if not exists (select 1 from public.customers where id = p_debt->>'customer_id' and store_id = v_store_id) then
+      raise exception 'Customer does not belong to store';
+    end if;
+    insert into public.customer_debts (id, store_id, customer_id, sale_id, total_amount, paid_amount, remaining_amount, due_date, status, created_at)
+    values (
+      p_debt->>'id', v_store_id, p_debt->>'customer_id', v_sale_id,
+      (p_debt->>'total_amount')::numeric, coalesce((p_debt->>'paid_amount')::numeric, 0),
+      (p_debt->>'remaining_amount')::numeric, nullif(p_debt->>'due_date', '')::timestamptz,
+      coalesce(p_debt->>'status', 'UNPAID'), coalesce((p_debt->>'created_at')::timestamptz, now())
+    );
+  elsif p_sale->>'payment_method' = 'credit' then
+    raise exception 'Credit sale requires debt payload';
+  end if;
+
+  return jsonb_build_object('id', v_sale_id, 'status', 'committed');
+end;
+$$;
+
+create or replace function public.receive_purchase(p_purchase jsonb, p_items jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_store_id text := p_purchase->>'store_id';
+  v_purchase_id text := p_purchase->>'id';
+  v_line jsonb;
+  v_total numeric := 0;
+begin
+  if v_store_id is null or v_purchase_id is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'Invalid purchase payload';
+  end if;
+  if not public.is_store_member(v_store_id) then
+    raise exception 'Not authorized for store %', v_store_id using errcode = '42501';
+  end if;
+  if exists (select 1 from public.purchase_orders where id = v_purchase_id) then
+    return jsonb_build_object('id', v_purchase_id, 'status', 'already_committed');
+  end if;
+  if not exists (select 1 from public.suppliers where id = p_purchase->>'supplier_id' and store_id = v_store_id) then
+    raise exception 'Supplier does not belong to store';
+  end if;
+
+  for v_line in select value from jsonb_array_elements(p_items)
+  loop
+    if (v_line->>'quantity')::numeric <= 0 or (v_line->>'buy_price')::numeric < 0 then
+      raise exception 'Invalid purchase item';
+    end if;
+    if not exists (select 1 from public.products where id = v_line->>'product_id' and store_id = v_store_id) then
+      raise exception 'Product does not belong to store';
+    end if;
+    if (v_line->>'subtotal')::numeric <> (v_line->>'quantity')::numeric * (v_line->>'buy_price')::numeric then
+      raise exception 'Invalid purchase item subtotal';
+    end if;
+    v_total := v_total + (v_line->>'subtotal')::numeric;
+  end loop;
+  if v_total <> (p_purchase->>'total')::numeric then raise exception 'Purchase total does not match its items'; end if;
+
+  insert into public.purchase_orders (id, store_id, supplier_id, created_by, total, payment_status, created_at)
+  values (v_purchase_id, v_store_id, p_purchase->>'supplier_id', auth.uid()::text, v_total,
+          coalesce(p_purchase->>'payment_status', 'PAID'), coalesce((p_purchase->>'created_at')::timestamptz, now()));
+  for v_line in select value from jsonb_array_elements(p_items)
+  loop
+    insert into public.purchase_items (id, purchase_id, product_id, quantity, buy_price, subtotal)
+    values (v_line->>'id', v_purchase_id, v_line->>'product_id', (v_line->>'quantity')::numeric,
+            (v_line->>'buy_price')::numeric, (v_line->>'subtotal')::numeric);
+    insert into public.stock_movements (id, product_id, store_id, user_id, device_id, type, quantity, note, created_at)
+    values (v_purchase_id || ':' || (v_line->>'product_id'), v_line->>'product_id', v_store_id,
+            auth.uid()::text, coalesce(p_purchase->>'device_id', ''), 'PURCHASE',
+            (v_line->>'quantity')::numeric, 'Réception #' || left(v_purchase_id, 8),
+            coalesce((p_purchase->>'created_at')::timestamptz, now()));
+  end loop;
+  return jsonb_build_object('id', v_purchase_id, 'status', 'committed');
+end;
+$$;
+
+revoke all on function public.checkout_sale(jsonb, jsonb, jsonb) from public;
+revoke all on function public.receive_purchase(jsonb, jsonb) from public;
+grant execute on function public.checkout_sale(jsonb, jsonb, jsonb) to authenticated;
+grant execute on function public.receive_purchase(jsonb, jsonb) to authenticated;

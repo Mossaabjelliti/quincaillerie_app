@@ -99,13 +99,15 @@ class SyncService {
     await _pushProducts(storeId);
     await _pushCustomers(storeId);
     await _pushSuppliers(storeId);
+    // Opening balances, adjustments, and other standalone events must reach
+    // Supabase before an atomic sale validates available stock there.
+    await _pushStockMovements(storeId, skipBusinessMovements: true);
     await _pushPurchases(storeId);
     await _pushProductUnits(storeId);
     await _pushProductVariants(storeId);
     await _pushSales(storeId);
     await _pushDebts(storeId);
     await _pushDebtPayments(storeId);
-    await _pushStockMovements(storeId);
   }
 
   Future<void> _pullStore(String storeId) async {
@@ -154,11 +156,18 @@ class SyncService {
     }
   }
 
-  Future<void> _pushStockMovements(String storeId) async {
+  Future<void> _pushStockMovements(
+    String storeId, {
+    bool skipBusinessMovements = false,
+  }) async {
     final unsynced = await (db.select(db.stockMovements)
           ..where((m) => m.storeId.equals(storeId) & m.synced.equals(false)))
         .get();
     for (final movement in unsynced) {
+      // New checkout/purchase movements are committed by their RPC, not as
+      // independent events. Their deterministic ids are saleId:productId or
+      // purchaseId:productId.
+      if (skipBusinessMovements && movement.id.contains(':')) continue;
       try {
         await supabase.from('stock_movements').upsert({
           'id': movement.id,
@@ -185,30 +194,54 @@ class SyncService {
         .get();
     for (final sale in unsynced) {
       try {
-        await supabase.from('sales').upsert({
+        final items = await (db.select(db.saleItems)
+              ..where((item) => item.saleId.equals(sale.id)))
+            .get();
+        final movements = await (db.select(db.stockMovements)
+              ..where((movement) => movement.id.like('${sale.id}:%')))
+            .get();
+        final debt = await (db.select(db.customerDebts)
+              ..where((row) => row.saleId.equals(sale.id)))
+            .getSingleOrNull();
+
+        await supabase.rpc('checkout_sale', params: {
+          'p_sale': {
           'id': sale.id,
           'store_id': sale.storeId,
-          'user_id': sale.userId,
           'customer_id': sale.customerId,
           'total': sale.total,
           'payment_method': sale.paymentMethod.name,
           'created_at': sale.createdAt.toIso8601String(),
-        });
-        final items = await (db.select(db.saleItems)
-              ..where((item) => item.saleId.equals(sale.id)))
-            .get();
-        for (final item in items) {
-          await supabase.from('sale_items').upsert({
+          'device_id': movements.isEmpty ? '' : movements.first.deviceId,
+          },
+          'p_items': [for (final item in items) {
             'id': item.id,
-            'sale_id': item.saleId,
             'product_id': item.productId,
             'quantity': item.quantity,
             'unit_price': item.unitPrice,
             'subtotal': item.subtotal,
-          });
-        }
+          }],
+          'p_debt': debt == null ? null : {
+            'id': debt.id,
+            'customer_id': debt.customerId,
+            'total_amount': debt.totalAmount,
+            'paid_amount': debt.paidAmount,
+            'remaining_amount': debt.remainingAmount,
+            'due_date': debt.dueDate?.toIso8601String() ?? '',
+            'status': debt.status,
+            'created_at': debt.createdAt.toIso8601String(),
+          },
+        });
         await (db.update(db.sales)..where((row) => row.id.equals(sale.id)))
             .write(const SalesCompanion(synced: Value(true)));
+        if (debt != null) {
+          await (db.update(db.customerDebts)..where((row) => row.id.equals(debt.id)))
+              .write(const CustomerDebtsCompanion(synced: Value(true)));
+        }
+        for (final movement in movements) {
+          await (db.update(db.stockMovements)..where((row) => row.id.equals(movement.id)))
+              .write(const StockMovementsCompanion(synced: Value(true)));
+        }
       } catch (e) {
         await _logError('sales', sale.id, 'PUSH', e.toString());
       }
@@ -318,30 +351,36 @@ class SyncService {
         .get();
     for (final purchase in unsynced) {
       try {
-        await supabase.from('purchase_orders').upsert({
-          'id': purchase.id,
-          'store_id': purchase.storeId,
-          'supplier_id': purchase.supplierId,
-          'created_by': purchase.createdBy,
-          'total': purchase.total,
-          'payment_status': purchase.paymentStatus,
-          'created_at': purchase.createdAt.toIso8601String(),
-        });
         final items = await (db.select(db.purchaseItems)
               ..where((item) => item.purchaseId.equals(purchase.id)))
             .get();
-        for (final item in items) {
-          await supabase.from('purchase_items').upsert({
+        final movements = await (db.select(db.stockMovements)
+              ..where((movement) => movement.id.like('${purchase.id}:%')))
+            .get();
+        await supabase.rpc('receive_purchase', params: {
+          'p_purchase': {
+          'id': purchase.id,
+          'store_id': purchase.storeId,
+          'supplier_id': purchase.supplierId,
+          'total': purchase.total,
+          'payment_status': purchase.paymentStatus,
+          'created_at': purchase.createdAt.toIso8601String(),
+          'device_id': movements.isEmpty ? '' : movements.first.deviceId,
+          },
+          'p_items': [for (final item in items) {
             'id': item.id,
-            'purchase_id': item.purchaseId,
             'product_id': item.productId,
             'quantity': item.quantity,
             'buy_price': item.buyPrice,
             'subtotal': item.subtotal,
-          });
-        }
+          }],
+        });
         await (db.update(db.purchases)..where((row) => row.id.equals(purchase.id)))
             .write(const PurchasesCompanion(synced: Value(true)));
+        for (final movement in movements) {
+          await (db.update(db.stockMovements)..where((row) => row.id.equals(movement.id)))
+              .write(const StockMovementsCompanion(synced: Value(true)));
+        }
       } catch (e) {
         await _logError('purchase_orders', purchase.id, 'PUSH', e.toString());
       }
