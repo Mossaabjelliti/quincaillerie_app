@@ -2,9 +2,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
-import 'package:uuid/uuid.dart';
-import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
+import '../../core/inventory/stock_engine.dart';
 import '../cart/cart_provider.dart';
 
 class ScanScreen extends StatefulWidget {
@@ -222,33 +221,17 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _recordMovement(Product product, MovementType type, double qty) async {
     if (qty <= 0) return;
     final db = context.read<AppDatabase>();
-    const uuid = Uuid();
-
-    final delta = type == MovementType.stockOut ? -qty : qty;
-    final newQty = product.quantity + delta;
-
-    await db.transaction(() async {
-      await db.into(db.stockMovements).insert(StockMovementsCompanion.insert(
-            id: uuid.v4(),
-            productId: product.id,
-            storeId: widget.storeId,
-            userId: widget.userId,
-            type: type,
-            quantity: qty,
-          ));
-
-      await (db.update(db.products)..where((p) => p.id.equals(product.id))).write(
-        ProductsCompanion(
-          quantity: Value(newQty),
-          updatedAt: Value(DateTime.now()),
-          synced: const Value(false),
-        ),
-      );
-    });
+    await StockEngine(db: db).recordMovement(
+      storeId: widget.storeId,
+      productId: product.id,
+      userId: widget.userId,
+      type: type,
+      quantity: qty,
+    );
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${product.name}: Nouveau stock ($newQty)')),
+      SnackBar(content: Text('${product.name}: mouvement de stock enregistrÃ©')),
     );
   }
 

@@ -3,16 +3,19 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
+import '../../core/device_identity.dart';
 
 /// Screen allowing shop owners to register a new product in their local inventory.
 /// Supports both fixed-unit items (pieces) and hardware bulk/cut items (meters, kg, liters).
 class AddProductScreen extends StatefulWidget {
   final String storeId;
+  final String userId;
   final String? initialBarcode;
 
   const AddProductScreen({
     super.key,
     required this.storeId,
+    required this.userId,
     this.initialBarcode,
   });
 
@@ -131,24 +134,46 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
       final newId = const Uuid().v4();
       final now = DateTime.now();
+      final deviceId = await DeviceIdentity.id;
 
-      await db.into(db.products).insert(
-            ProductsCompanion.insert(
-              id: newId,
-              storeId: widget.storeId,
-              name: name,
-              barcode: barcode,
-              category: Value(category),
-              unit: _selectedUnit,
-              buyPrice: Value(buyPrice),
-              sellPrice: Value(sellPrice),
-              quantity: Value(quantity),
-              lowStockThreshold: Value(lowStock),
-              createdAt: Value(now),
-              updatedAt: Value(now),
-              synced: const Value(false),
-            ),
-          );
+      await db.transaction(() async {
+        await db.into(db.products).insert(
+              ProductsCompanion.insert(
+                id: newId,
+                storeId: widget.storeId,
+                name: name,
+                barcode: barcode,
+                category: Value(category),
+                unit: _selectedUnit,
+                buyPrice: Value(buyPrice),
+                sellPrice: Value(sellPrice),
+                // This is a cache. The opening balance below is authoritative.
+                quantity: const Value(0),
+                lowStockThreshold: Value(lowStock),
+                createdAt: Value(now),
+                updatedAt: Value(now),
+                synced: const Value(false),
+              ),
+            );
+        if (quantity != 0) {
+          await db.into(db.stockMovements).insert(
+                StockMovementsCompanion.insert(
+                  id: const Uuid().v4(),
+                  productId: newId,
+                  storeId: widget.storeId,
+                  userId: widget.userId,
+                  deviceId: Value(deviceId),
+                  type: MovementType.stockIn,
+                  quantity: quantity,
+                  note: const Value('Stock initial'),
+                  createdAt: Value(now),
+                  synced: const Value(false),
+                ),
+              );
+          await (db.update(db.products)..where((p) => p.id.equals(newId)))
+              .write(ProductsCompanion(quantity: Value(quantity)));
+        }
+      });
 
       if (!mounted) return;
 

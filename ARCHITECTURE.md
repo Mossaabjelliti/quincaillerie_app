@@ -7,7 +7,7 @@ lib/
 ├── core/
 │   ├── auth/           # AuthService, AuthProvider, UserSession
 │   ├── inventory/      # StockEngine (Event sourcing SUM logic)
-│   ├── sync/           # SyncManager (Bidirectional Push/Pull, Queue)
+│   ├── services/       # SyncService (the single bidirectional sync engine)
 │   ├── theme/          # AppTheme, visual design tokens
 │   └── utils/          # Currency formatters, date utilities
 ├── data/
@@ -46,6 +46,6 @@ Local SQLite (Drift) <---> Sync Queue <---> Supabase PostgreSQL
 ```
 
 1. **Write Local First:** All operations write to SQLite instantly with `synced = false`.
-2. **Push Queue:** `SyncManager` queries unsynced rows and upserts to Supabase with device identification (`device_id`).
+2. **Push Queue:** `SyncService` queries store-scoped unsynced rows and upserts to Supabase with a persistent installation identifier (`device_id`).
 3. **Pull Delta:** Fetches remote changes per `store_id` and updates local Drift SQLite database.
 4. **Failure Recovery:** Errors are logged to local `SyncLogs` table with automatic retries on next connection state change.

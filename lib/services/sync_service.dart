@@ -11,10 +11,10 @@ class SyncService {
   final AppDatabase db;
   final SupabaseClient supabase;
   final StockEngine _stockEngine;
-  final String deviceId = const Uuid().v4();
 
   SyncStatus status = SyncStatus.idle;
   DateTime? lastSyncedAt;
+  int _failures = 0;
 
   SyncService({required this.db, required this.supabase})
       : _stockEngine = StockEngine(db: db);
@@ -32,6 +32,7 @@ class SyncService {
   }
 
   Future<void> _logError(String targetTable, String rowId, String action, String errorMessage) async {
+    _failures++;
     await db.into(db.syncLogs).insert(
           SyncLogsCompanion.insert(
             id: const Uuid().v4(),
@@ -64,21 +65,26 @@ class SyncService {
   }
 
   /// Daily sync entry point used by the app shell and background task.
-  Future<SyncStatus> syncNow() async {
+  Future<SyncStatus> syncNow({String? storeId}) async {
     if (!await _hasConnection()) {
       status = SyncStatus.offline;
       return status;
     }
 
     status = SyncStatus.syncing;
+    _failures = 0;
     try {
-      final storeIds = await _knownStoreIds();
+      final storeIds = storeId == null ? await _knownStoreIds() : [storeId];
       for (final storeId in storeIds) {
         await _pushStore(storeId);
         await _pullStore(storeId);
       }
-      lastSyncedAt = DateTime.now();
-      status = SyncStatus.success;
+      if (_failures == 0) {
+        lastSyncedAt = DateTime.now();
+        status = SyncStatus.success;
+      } else {
+        status = SyncStatus.failed;
+      }
     } catch (e) {
       status = SyncStatus.failed;
       await _logError('GLOBAL_SYNC', 'all', 'SYNC', e.toString());
@@ -87,18 +93,19 @@ class SyncService {
   }
 
   Future<void> _pushStore(String storeId) async {
+    // Parents first. Child records are only marked synced once their complete
+    // local business document has been accepted by Supabase.
+    await _pushStoresAndMembers(storeId);
     await _pushProducts(storeId);
-    await _pushStockMovements(storeId);
-    await _pushSales(storeId);
-    await _pushSaleItems(storeId);
     await _pushCustomers(storeId);
-    await _pushDebts(storeId);
-    await _pushDebtPayments(storeId);
     await _pushSuppliers(storeId);
     await _pushPurchases(storeId);
     await _pushProductUnits(storeId);
     await _pushProductVariants(storeId);
-    await _pushStoresAndMembers(storeId);
+    await _pushSales(storeId);
+    await _pushDebts(storeId);
+    await _pushDebtPayments(storeId);
+    await _pushStockMovements(storeId);
   }
 
   Future<void> _pullStore(String storeId) async {
@@ -132,7 +139,7 @@ class SyncService {
           'unit': product.unit.name,
           'buy_price': product.buyPrice,
           'sell_price': product.sellPrice,
-          'quantity': product.quantity,
+          // Stock movements are authoritative; quantity is only a local cache.
           'low_stock_threshold': product.lowStockThreshold,
           'brand': product.brand,
           'supplier_id': product.supplierId,
@@ -158,8 +165,8 @@ class SyncService {
           'product_id': movement.productId,
           'store_id': movement.storeId,
           'user_id': movement.userId,
-          'device_id': movement.deviceId.isNotEmpty ? movement.deviceId : deviceId,
-          'type': movement.type.name,
+          'device_id': movement.deviceId,
+          'type': _movementTypeToRemote(movement.type),
           'quantity': movement.quantity,
           'note': movement.note,
           'created_at': movement.createdAt.toIso8601String(),
@@ -187,20 +194,10 @@ class SyncService {
           'payment_method': sale.paymentMethod.name,
           'created_at': sale.createdAt.toIso8601String(),
         });
-        await (db.update(db.sales)..where((row) => row.id.equals(sale.id)))
-            .write(const SalesCompanion(synced: Value(true)));
-      } catch (e) {
-        await _logError('sales', sale.id, 'PUSH', e.toString());
-      }
-    }
-  }
-
-  Future<void> _pushSaleItems(String storeId) async {
-    final sales = await (db.select(db.sales)..where((s) => s.storeId.equals(storeId))).get();
-    for (final sale in sales) {
-      final items = await (db.select(db.saleItems)..where((item) => item.saleId.equals(sale.id))).get();
-      for (final item in items) {
-        try {
+        final items = await (db.select(db.saleItems)
+              ..where((item) => item.saleId.equals(sale.id)))
+            .get();
+        for (final item in items) {
           await supabase.from('sale_items').upsert({
             'id': item.id,
             'sale_id': item.saleId,
@@ -209,9 +206,11 @@ class SyncService {
             'unit_price': item.unitPrice,
             'subtotal': item.subtotal,
           });
-        } catch (e) {
-          await _logError('sale_items', item.id, 'PUSH', e.toString());
         }
+        await (db.update(db.sales)..where((row) => row.id.equals(sale.id)))
+            .write(const SalesCompanion(synced: Value(true)));
+      } catch (e) {
+        await _logError('sales', sale.id, 'PUSH', e.toString());
       }
     }
   }
@@ -328,6 +327,19 @@ class SyncService {
           'payment_status': purchase.paymentStatus,
           'created_at': purchase.createdAt.toIso8601String(),
         });
+        final items = await (db.select(db.purchaseItems)
+              ..where((item) => item.purchaseId.equals(purchase.id)))
+            .get();
+        for (final item in items) {
+          await supabase.from('purchase_items').upsert({
+            'id': item.id,
+            'purchase_id': item.purchaseId,
+            'product_id': item.productId,
+            'quantity': item.quantity,
+            'buy_price': item.buyPrice,
+            'subtotal': item.subtotal,
+          });
+        }
         await (db.update(db.purchases)..where((row) => row.id.equals(purchase.id)))
             .write(const PurchasesCompanion(synced: Value(true)));
       } catch (e) {
@@ -492,10 +504,7 @@ class SyncService {
                 storeId: remote['store_id'] as String,
                 userId: remote['user_id'] as String,
                 deviceId: Value(remote['device_id'] as String? ?? ''),
-                type: MovementType.values.firstWhere(
-                  (type) => type.name == (remote['type'] as String? ?? 'stockOut'),
-                  orElse: () => MovementType.stockOut,
-                ),
+                type: _movementTypeFromRemote(remote['type'] as String?),
                 quantity: (remote['quantity'] as num).toDouble(),
                 note: Value(remote['note'] as String? ?? ''),
                 createdAt: Value(DateTime.tryParse(remote['created_at'] as String? ?? '') ?? DateTime.now()),
@@ -714,4 +723,23 @@ class SyncService {
       await _logError('product_variants', storeId, 'PULL', e.toString());
     }
   }
+
+  static String _movementTypeToRemote(MovementType type) => switch (type) {
+        MovementType.stockIn => 'stockIn',
+        MovementType.stockOut => 'stockOut',
+        MovementType.adjustment => 'ADJUSTMENT',
+        MovementType.purchase => 'PURCHASE',
+        MovementType.sale => 'SALE',
+        MovementType.returnItem => 'RETURN',
+      };
+
+  static MovementType _movementTypeFromRemote(String? type) => switch (type) {
+        'PURCHASE' || 'purchase' => MovementType.purchase,
+        'SALE' || 'sale' => MovementType.sale,
+        'RETURN' || 'returnItem' => MovementType.returnItem,
+        'ADJUSTMENT' || 'adjustment' => MovementType.adjustment,
+        'stockIn' => MovementType.stockIn,
+        'stockOut' => MovementType.stockOut,
+        _ => MovementType.stockOut,
+      };
 }

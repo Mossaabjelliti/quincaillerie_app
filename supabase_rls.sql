@@ -78,6 +78,13 @@ create table if not exists public.products (
   unique (store_id, barcode)
 );
 
+-- The Flutter client has used these catalog fields since the first offline
+-- release. `if not exists` keeps this script safe for both new and existing
+-- projects; without it product upserts fail at runtime on older deployments.
+alter table public.products add column if not exists brand text default '';
+alter table public.products add column if not exists supplier_id text default '';
+alter table public.products add column if not exists image_url text default '';
+
 -- 5. STOCK MOVEMENTS TABLE (Event-based inventory)
 create table if not exists public.stock_movements (
   id text primary key,

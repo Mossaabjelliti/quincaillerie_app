@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 import '../../data/local/database.dart';
+import '../device_identity.dart';
 
 class StockEngine {
   final AppDatabase db;
@@ -14,37 +15,33 @@ class StockEngine {
     required String userId,
     required MovementType type,
     required double quantity,
-    required String deviceId,
+    String? deviceId,
     String note = '',
   }) async {
     const uuid = Uuid();
     final movementId = uuid.v4();
     final now = DateTime.now();
+    final resolvedDeviceId = (deviceId == null || deviceId.isEmpty)
+        ? await DeviceIdentity.id
+        : deviceId;
 
-    await db.into(db.stockMovements).insert(
-          StockMovementsCompanion.insert(
-            id: movementId,
-            productId: productId,
-            storeId: storeId,
-            userId: userId,
-            deviceId: Value(deviceId),
-            type: type,
-            quantity: quantity,
-            note: Value(note),
-            createdAt: Value(now),
-            synced: const Value(false),
-          ),
-        );
-
-    // Also update product cached stock level for fast local querying
-    final currentStock = await calculateProductStock(storeId, productId);
-    await (db.update(db.products)..where((p) => p.id.equals(productId))).write(
-      ProductsCompanion(
-        quantity: Value(currentStock),
-        updatedAt: Value(now),
-        synced: const Value(false),
-      ),
-    );
+    await db.transaction(() async {
+      await db.into(db.stockMovements).insert(
+            StockMovementsCompanion.insert(
+              id: movementId,
+              productId: productId,
+              storeId: storeId,
+              userId: userId,
+              deviceId: Value(resolvedDeviceId),
+              type: type,
+              quantity: quantity,
+              note: Value(note),
+              createdAt: Value(now),
+              synced: const Value(false),
+            ),
+          );
+      await reconcileProductCache(storeId, productId);
+    });
 
     return movementId;
   }
@@ -84,20 +81,23 @@ class StockEngine {
         .get();
   }
 
+  /// Updates only the local read cache. Stock movements remain authoritative.
+  Future<void> reconcileProductCache(String storeId, String productId) async {
+    final stock = await calculateProductStock(storeId, productId);
+    await (db.update(db.products)..where((p) => p.id.equals(productId))).write(
+      ProductsCompanion(quantity: Value(stock)),
+    );
+  }
+
   /// Recalculate and repair cached quantities for all products in a store
   Future<void> reconcileStoreStock(String storeId) async {
     final products = await db.allProducts(storeId);
-    final now = DateTime.now();
 
     for (final p in products) {
       final stock = await calculateProductStock(storeId, p.id);
       if (p.quantity != stock) {
         await (db.update(db.products)..where((row) => row.id.equals(p.id))).write(
-          ProductsCompanion(
-            quantity: Value(stock),
-            updatedAt: Value(now),
-            synced: const Value(false),
-          ),
+          ProductsCompanion(quantity: Value(stock)),
         );
       }
     }

@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
+import '../../core/device_identity.dart';
+import '../../core/inventory/stock_engine.dart';
 
 class CartItem {
   final Product product;
@@ -87,7 +89,7 @@ class CartProvider extends ChangeNotifier {
   /// 1. Create 1 Sale row
   /// 2. Create SaleItem rows for each item
   /// 3. Create StockMovement (stockOut) rows
-  /// 4. Reduce Product stock quantity
+  /// 4. Record stock movements. Product.quantity is rebuilt afterwards as a cache.
   Future<bool> checkout({
     required AppDatabase db,
     required String storeId,
@@ -109,6 +111,7 @@ class CartProvider extends ChangeNotifier {
     final total = _items.values.fold<double>(0.0, (sum, item) => sum + (item.product.sellPrice * item.quantity * priceMultiplier));
     final effectiveCustomerId = customerId ?? _customerId;
     final effectiveCustomerName = customerName ?? _customerName;
+    final deviceId = await DeviceIdentity.id;
 
     await db.transaction(() async {
       // 1. Insert Sale record
@@ -142,14 +145,15 @@ class CartProvider extends ChangeNotifier {
               ),
             );
 
-        // 3. Insert StockMovement record (stockOut)
+        // 3. Insert the immutable inventory event.
         await db.into(db.stockMovements).insert(
               StockMovementsCompanion.insert(
                 id: movementId,
                 productId: item.product.id,
                 storeId: storeId,
                 userId: userId,
-                type: MovementType.stockOut,
+                deviceId: Value(deviceId),
+                type: MovementType.sale,
                 quantity: item.quantity,
                 note: Value('Vente #${saleId.substring(0, 8)}'),
                 createdAt: Value(now),
@@ -157,17 +161,6 @@ class CartProvider extends ChangeNotifier {
               ),
             );
 
-        // 4. Update Product stock level
-        final newQuantity = item.product.quantity - item.quantity;
-        await (db.update(db.products)
-              ..where((p) => p.id.equals(item.product.id)))
-            .write(
-          ProductsCompanion(
-            quantity: Value(newQuantity),
-            updatedAt: Value(now),
-            synced: const Value(false),
-          ),
-        );
       }
 
       if (paymentMethod == PaymentMethod.credit && effectiveCustomerId != null) {
@@ -193,6 +186,14 @@ class CartProvider extends ChangeNotifier {
             SalesCompanion(customerId: Value(effectiveCustomerId)),
           );
         }
+      }
+
+      // The cache participates in the same commit as the sale. If this fails,
+      // the business transaction rolls back instead of looking failed after a
+      // sale has already been committed.
+      final stockEngine = StockEngine(db: db);
+      for (final item in currentItems) {
+        await stockEngine.reconcileProductCache(storeId, item.product.id);
       }
     });
 

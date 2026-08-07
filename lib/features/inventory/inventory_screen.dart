@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../../data/local/database.dart';
 import '../../core/inventory/stock_engine.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/device_identity.dart';
 import 'unit_variant_dialog.dart';
 
 class InventoryScreen extends StatefulWidget {
@@ -161,17 +162,40 @@ class _InventoryScreenState extends State<InventoryScreen> {
               final newSell = double.parse(sellPriceController.text.replaceAll(',', '.'));
               final newBuy = double.tryParse(buyPriceController.text.replaceAll(',', '.')) ?? product.buyPrice;
               final newThreshold = double.tryParse(lowStockController.text.replaceAll(',', '.')) ?? product.lowStockThreshold;
+              final deviceId = await DeviceIdentity.id;
 
-              await (db.update(db.products)..where((p) => p.id.equals(product.id))).write(
-                ProductsCompanion(
-                  quantity: Value(newQty),
-                  sellPrice: Value(newSell),
-                  buyPrice: Value(newBuy),
-                  lowStockThreshold: Value(newThreshold),
-                  updatedAt: Value(DateTime.now()),
-                  synced: const Value(false),
-                ),
-              );
+              final userId = ctx.read<AuthProvider>().session?.userId ?? '';
+              await db.transaction(() async {
+                await (db.update(db.products)..where((p) => p.id.equals(product.id))).write(
+                  ProductsCompanion(
+                    sellPrice: Value(newSell),
+                    buyPrice: Value(newBuy),
+                    lowStockThreshold: Value(newThreshold),
+                    updatedAt: Value(DateTime.now()),
+                    synced: const Value(false),
+                  ),
+                );
+                final delta = newQty - product.quantity;
+                if (delta != 0) {
+                  await db.into(db.stockMovements).insert(
+                        StockMovementsCompanion.insert(
+                          id: const Uuid().v4(),
+                          productId: product.id,
+                          storeId: widget.storeId,
+                          userId: userId,
+                          deviceId: Value(deviceId),
+                          type: MovementType.adjustment,
+                          quantity: delta,
+                          note: const Value('Modification depuis fiche produit'),
+                          createdAt: Value(DateTime.now()),
+                          synced: const Value(false),
+                        ),
+                      );
+                  await (db.update(db.products)..where((p) => p.id.equals(product.id))).write(
+                    ProductsCompanion(quantity: Value(newQty)),
+                  );
+                }
+              });
 
               if (!ctx.mounted) return;
               Navigator.pop(ctx, true);
@@ -276,7 +300,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
       userId: userId,
       type: MovementType.adjustment,
       quantity: delta,
-      deviceId: const Uuid().v4(),
       note: '${reasonController.text.trim()} | réel: $actualQty | système: ${product.quantity}',
     );
 

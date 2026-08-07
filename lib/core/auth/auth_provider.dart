@@ -51,22 +51,16 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _loadUserSession(String userId, String email) async {
     try {
-      Map<String, dynamic>? profileRes;
-      try {
-        profileRes = await authService.supabase
-            .from('profiles')
-            .select()
-            .eq('id', userId)
-            .maybeSingle();
-      } catch (_) {}
+      final profileRes = await authService.supabase
+          .from('profiles')
+          .select()
+          .eq('id', userId)
+          .maybeSingle();
 
-      dynamic membersRes;
-      try {
-        membersRes = await authService.supabase
-            .from('store_members')
-            .select('id, store_id, user_id, role, created_at, stores:stores(id, name, address, phone, owner_id, created_at)')
-            .eq('user_id', userId);
-      } catch (_) {}
+      final membersRes = await authService.supabase
+          .from('store_members')
+          .select('id, store_id, user_id, role, created_at, stores:stores(id, name, address, phone, owner_id, created_at)')
+          .eq('user_id', userId);
 
       final fullName = profileRes?['full_name'] as String? ?? email.split('@').first;
       final phone = profileRes?['phone'] as String? ?? '';
@@ -113,7 +107,7 @@ class AuthProvider extends ChangeNotifier {
       for (final member in localMembers) {
         storeRoles[member.storeId] = member.role;
       }
-      for (final ls in localStores) {
+      for (final ls in localStores.where((store) => storeRoles.containsKey(store.id))) {
         if (!loadedStores.any((s) => s.id == ls.id)) {
           loadedStores.add(ls);
         }
@@ -155,9 +149,11 @@ class AuthProvider extends ChangeNotifier {
           );
     } catch (e) {
       final localProfiles = await (db.select(db.profiles)..where((p) => p.id.equals(userId))).get();
-      final localStores = await db.select(db.stores).get();
       final localMembers = await (db.select(db.storeMembers)..where((m) => m.userId.equals(userId))).get();
       final localRoles = {for (final member in localMembers) member.storeId: member.role};
+      final localStores = (await db.select(db.stores).get())
+          .where((store) => localRoles.containsKey(store.id))
+          .toList();
 
       _session = UserSession(
         userId: userId,
@@ -301,7 +297,10 @@ class AuthProvider extends ChangeNotifier {
         'user_id': uid,
         'role': 'owner',
       });
-    } catch (_) {}
+    } catch (e) {
+      // The local rows remain unsynced and will be retried by the sync engine.
+      debugPrint('Store creation will be synced later: $e');
+    }
 
     await _loadUserSession(uid, userEmail ?? _session?.userEmail ?? '');
     notifyListeners();

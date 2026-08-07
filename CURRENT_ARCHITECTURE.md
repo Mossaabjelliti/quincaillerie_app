@@ -73,7 +73,7 @@ lib/
 2. **Missing Role-Based Access Control (RBAC):** No roles defined (`owner`, `manager`, `cashier`, `stock_manager`) to enforce permissions for sensitive operations like price edits or financial dashboards.
 
 ### 3.5 Scalability & Sync Engine Deficiencies
-1. **Push-Only Synchronization:** `SyncService` only pushes unsynced local rows (`synced = false`) to Supabase. It has **no pull mechanism**, meaning updates made on other devices or cloud are never retrieved locally.
+1. **Synchronization:** `SyncService` is the single push/pull implementation. It synchronizes one store at a time from the foreground and reconciles the local stock cache after each pull.
 2. **No Conflict Resolution:** Last-write-wins without timestamp checking or vector clocks.
 3. **No Sync Log / Failure Diagnostics:** Errors during sync are caught silently without persisting to a local `sync_logs` table for retry or debugging.
 4. **No Device Tracking:** `device_id` is missing from `stock_movements` and sync operations.
@@ -85,7 +85,7 @@ To transform `quincaillerie_app` into a production-ready multi-tenant SaaS OS fo
 
 1. **Authentication & Multi-Tenant RBAC:** Supabase Auth, `profiles`, `stores`, `store_members`, and strict Row Level Security policies.
 2. **Domain-Driven Database & Event-Based Stock Engine:** Refactoring Drift and Supabase schemas for `stock_movements`, `product_units`, `product_variants`, `suppliers`, `purchases`, `customers`, and `customer_debts`. Stock balance = `SUM(movements)`.
-3. **Bidirectional Reliable Offline Sync Engine:** Implement `SyncManager` with sync queue, bidirectional delta pull/push, conflict handling, retry mechanisms, and `sync_logs`.
+3. **Reliable Offline Sync:** Evolve `SyncService` with a durable queue, delta pull/push, conflict handling, retry mechanisms, and `sync_logs`.
 4. **Quincaillerie Core Modules:** Complete Product Catalog, Unit Conversions, Variant Matrix, Supplier Purchases, Customer Debt System, Upgraded POS Cart & PDF Invoices (A4 + Thermal 80mm).
 5. **Analytics & Multilingual UI/UX:** Responsive Dashboard, Low Stock Alerts, Arabic/French/English localization (`easy_localization`), and clean hardware-store friendly layout.
 6. **Code Quality, Testing & Production Docs:** Clean Architecture refactoring (`core/`, `features/`), Unit & Widget test coverage, and deployment guides.
