@@ -10,6 +10,8 @@ import 'services/sync_background.dart';
 import 'services/sync_service.dart';
 import 'core/auth/auth_service.dart';
 import 'core/auth/auth_provider.dart';
+import 'core/licensing/license_repository.dart';
+import 'core/licensing/license_service.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/store_selection_screen.dart';
 import 'features/scan/scan_screen.dart';
@@ -24,6 +26,7 @@ import 'features/qr_generator/qr_generator_screen.dart';
 import 'features/customers/customer_debt_screen.dart';
 import 'features/suppliers/supplier_management_screen.dart';
 import 'features/sync/sync_logs_screen.dart';
+import 'features/desktop/desktop_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -66,6 +69,9 @@ Future<void> main() async {
           create: (_) => AuthProvider(authService: authService, db: db),
         ),
         ChangeNotifierProvider<CartProvider>(create: (_) => CartProvider()),
+        ChangeNotifierProvider<LicenseService>(
+          create: (_) => LicenseService(repository: CachedLicenseRepository())..load(),
+        ),
       ],
       child: const QuincaillerieApp(),
     ),
@@ -134,7 +140,12 @@ class AuthWrapper extends StatelessWidget {
         );
       case AuthStatus.authenticated:
         if (auth.session != null && auth.session!.hasActiveStore) {
-          return _HomeShell(
+          return !kIsWeb && Platform.isWindows
+              ? DesktopShell(
+                  storeId: auth.session!.currentStoreId!,
+                  userId: auth.session!.userId,
+                )
+              : _HomeShell(
             storeId: auth.session!.currentStoreId!,
             userId: auth.session!.userId,
           );

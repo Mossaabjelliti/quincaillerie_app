@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../../services/pdf_receipt_service.dart';
+import '../../core/licensing/license_service.dart';
 import 'cart_provider.dart';
 
 class CartScreen extends StatefulWidget {
@@ -89,6 +90,10 @@ class _CartScreenState extends State<CartScreen> {
   Future<void> _handleCheckout() async {
     final cart = context.read<CartProvider>();
     if (cart.isEmpty) return;
+    if (!context.read<LicenseService>().state.entitlements.canCreateCommercialOperations) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mode restreint : le renouvellement est requis pour les nouvelles ventes.')));
+      return;
+    }
     if (_paymentMethod == PaymentMethod.credit && cart.customerId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Choisissez un client avant une vente à crédit.')),
