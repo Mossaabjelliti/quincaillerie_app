@@ -8,13 +8,33 @@ import '../../core/inventory/stock_engine.dart';
 class CartItem {
   final Product product;
   double quantity;
+  final ProductUnitConversion? unitConversion;
+  final ProductVariant? variant;
 
   CartItem({
     required this.product,
     this.quantity = 1.0,
+    this.unitConversion,
+    this.variant,
   });
 
-  double get subtotal => product.sellPrice * quantity;
+  /// Effective unit price: variant price > unit conversion price > base price.
+  double get effectiveUnitPrice {
+    if (variant != null && variant!.sellPrice > 0) return variant!.sellPrice;
+    if (unitConversion != null && unitConversion!.sellingPrice > 0) {
+      return unitConversion!.sellingPrice;
+    }
+    return product.sellPrice;
+  }
+
+  /// Display label for the selected unit/variant.
+  String get unitLabel {
+    if (variant != null) return variant!.variantName;
+    if (unitConversion != null) return unitConversion!.unitName;
+    return product.unit.name;
+  }
+
+  double get subtotal => effectiveUnitPrice * quantity;
 }
 
 /// Manages active shopping cart state and handles checkout database transactions.
@@ -34,21 +54,28 @@ class CartProvider extends ChangeNotifier {
   double get totalAmount =>
       _items.values.fold(0.0, (sum, item) => sum + (item.subtotal * _priceMultiplier));
 
-    String? get customerId => _customerId;
-    String? get customerName => _customerName;
-    double get priceMultiplier => _priceMultiplier;
+  String? get customerId => _customerId;
+  String? get customerName => _customerName;
+  double get priceMultiplier => _priceMultiplier;
 
   bool get isEmpty => _items.isEmpty;
 
   CartItem? getItem(String productId) => _items[productId];
 
-  void addItem(Product product, [double quantity = 1.0]) {
+  void addItem(
+    Product product, [
+    double quantity = 1.0,
+    ProductUnitConversion? unitConversion,
+    ProductVariant? variant,
+  ]) {
     if (_items.containsKey(product.id)) {
       _items[product.id]!.quantity += quantity;
     } else {
       _items[product.id] = CartItem(
         product: product,
         quantity: quantity,
+        unitConversion: unitConversion,
+        variant: variant,
       );
     }
     notifyListeners();
@@ -108,7 +135,10 @@ class CartProvider extends ChangeNotifier {
     final saleId = uuid.v4();
     final now = DateTime.now();
     final currentItems = List<CartItem>.from(_items.values);
-    final total = _items.values.fold<double>(0.0, (sum, item) => sum + (item.product.sellPrice * item.quantity * priceMultiplier));
+    final total = _items.values.fold<double>(
+      0.0,
+      (sum, item) => sum + (item.effectiveUnitPrice * item.quantity * priceMultiplier),
+    );
     final effectiveCustomerId = customerId ?? _customerId;
     final effectiveCustomerName = customerName ?? _customerName;
     final deviceId = await DeviceIdentity.id;
@@ -132,7 +162,7 @@ class CartProvider extends ChangeNotifier {
         final saleItemId = uuid.v4();
         // Shared by local and remote transaction processing for idempotency.
         final movementId = '$saleId:${item.product.id}';
-        final unitPrice = item.product.sellPrice * priceMultiplier;
+        final unitPrice = item.effectiveUnitPrice * priceMultiplier;
 
         // 2. Insert SaleItem record
         await db.into(db.saleItems).insert(
@@ -161,7 +191,6 @@ class CartProvider extends ChangeNotifier {
                 synced: const Value(false),
               ),
             );
-
       }
 
       if (paymentMethod == PaymentMethod.credit && effectiveCustomerId != null) {

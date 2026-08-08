@@ -11,7 +11,12 @@ class ScanScreen extends StatefulWidget {
   final String userId;
   final bool canManageStock;
 
-  const ScanScreen({super.key, required this.storeId, required this.userId, required this.canManageStock});
+  const ScanScreen({
+    super.key,
+    required this.storeId,
+    required this.userId,
+    required this.canManageStock,
+  });
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -74,127 +79,196 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _showMovementDialog(Product product) async {
     final qtyController = TextEditingController(text: '1');
+
+    // Load available unit conversions and variants for this product.
+    final db = context.read<AppDatabase>();
+    final units = await (db.select(db.productUnitConversions)
+          ..where((u) => u.productId.equals(product.id)))
+        .get();
+    final variants = await (db.select(db.productVariants)
+          ..where((v) => v.productId.equals(product.id)))
+        .get();
+
+    if (!mounted) return;
+
+    ProductUnitConversion? selectedUnit;
+    ProductVariant? selectedVariant;
+
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 20, right: 20, top: 20,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade100,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(Icons.qr_code_2_rounded, color: Colors.amber.shade900),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final displayPrice = selectedVariant?.sellPrice ??
+              selectedUnit?.sellingPrice ??
+              product.sellPrice;
+          final displayUnit = selectedVariant?.variantName ??
+              selectedUnit?.unitName ??
+              product.unit.name;
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
                     children: [
-                      Text(
-                        product.name,
-                        style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade100,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.qr_code_2_rounded, color: Colors.amber.shade900),
                       ),
-                      Text(
-                        'Code: ${product.barcode} | Unit: ${product.unit.name}',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              product.name,
+                              style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              'Code: ${product.barcode} | Unit: ${product.unit.name}',
+                              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blueGrey.shade50,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Stock: ${product.quantity} ${product.unit.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text('${product.sellPrice.toStringAsFixed(3)} TND', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green.shade800, fontSize: 16)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: qtyController,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                labelText: 'Quantité (${product.unit.name})',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.numbers_rounded),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.add_shopping_cart_rounded),
-              label: const Text('Ajouter au panier (Vente)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber.shade700,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: () => Navigator.pop(ctx, {
-                'action': 'cart',
-                'qty': double.tryParse(qtyController.text) ?? 1.0,
-              }),
-            ),
-            const SizedBox(height: 10),
-            if (widget.canManageStock) ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.call_received),
-                      label: const Text('Entrée (achat)'),
-                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                      onPressed: () => Navigator.pop(ctx, {
-                        'action': 'movement',
-                        'type': MovementType.stockIn,
-                        'qty': double.tryParse(qtyController.text) ?? 1.0,
-                      }),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blueGrey.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Stock: ${product.quantity} ${product.unit.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text('${displayPrice.toStringAsFixed(3)} TND', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green.shade800, fontSize: 16)),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.call_made),
-                      label: const Text('Sortie directe'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.orange.shade800,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                  if (units.isNotEmpty || variants.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    if (units.isNotEmpty)
+                      DropdownButtonFormField<ProductUnitConversion>(
+                        initialValue: selectedUnit,
+                        decoration: const InputDecoration(
+                          labelText: 'Unité de vente',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.straighten),
+                        ),
+                        items: units.map((u) {
+                          return DropdownMenuItem<ProductUnitConversion>(
+                            value: u,
+                            child: Text('${u.unitName} (${u.conversionFactor} pc) — ${u.sellingPrice.toStringAsFixed(3)} TND'),
+                          );
+                        }).toList(),
+                        onChanged: (val) => setModalState(() => selectedUnit = val),
                       ),
-                      onPressed: () => Navigator.pop(ctx, {
-                        'action': 'movement',
-                        'type': MovementType.stockOut,
-                        'qty': double.tryParse(qtyController.text) ?? 1.0,
-                      }),
+                    if (variants.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<ProductVariant>(
+                        initialValue: selectedVariant,
+                        decoration: const InputDecoration(
+                          labelText: 'Variante',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.category_outlined),
+                        ),
+                        items: variants.map((v) {
+                          return DropdownMenuItem<ProductVariant>(
+                            value: v,
+                            child: Text('${v.variantName} — ${v.sellPrice.toStringAsFixed(3)} TND'),
+                          );
+                        }).toList(),
+                        onChanged: (val) => setModalState(() => selectedVariant = val),
+                      ),
+                    ],
+                  ],
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: qtyController,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'Quantité ($displayUnit)',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.numbers_rounded),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.add_shopping_cart_rounded),
+                    label: const Text('Ajouter au panier (Vente)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amber.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => Navigator.pop(ctx, {
+                      'action': 'cart',
+                      'qty': double.tryParse(qtyController.text) ?? 1.0,
+                      'unit': selectedUnit,
+                      'variant': selectedVariant,
+                    }),
+                  ),
+                  const SizedBox(height: 10),
+                  if (widget.canManageStock) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.call_received),
+                            label: const Text('Entrée (achat)'),
+                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                            onPressed: () => Navigator.pop(ctx, {
+                              'action': 'movement',
+                              'type': MovementType.stockIn,
+                              'qty': double.tryParse(qtyController.text) ?? 1.0,
+                            }),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.call_made),
+                            label: const Text('Sortie directe'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.orange.shade800,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            onPressed: () => Navigator.pop(ctx, {
+                              'action': 'movement',
+                              'type': MovementType.stockOut,
+                              'qty': double.tryParse(qtyController.text) ?? 1.0,
+                            }),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
-            ],
-          ],
-        ),
+            ),
+          );
+        },
       ),
     );
 
@@ -203,7 +277,9 @@ class _ScanScreenState extends State<ScanScreen> {
     if (result['action'] == 'cart') {
       final qty = result['qty'] as double;
       if (qty > 0) {
-        context.read<CartProvider>().addItem(product, qty);
+        final unit = result['unit'] as ProductUnitConversion?;
+        final variant = result['variant'] as ProductVariant?;
+        context.read<CartProvider>().addItem(product, qty, unit, variant);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${product.name} ($qty) ajouté au panier'),
@@ -232,7 +308,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${product.name}: mouvement de stock enregistrÃ©')),
+      SnackBar(content: Text('${product.name}: mouvement de stock enregistré')),
     );
   }
 

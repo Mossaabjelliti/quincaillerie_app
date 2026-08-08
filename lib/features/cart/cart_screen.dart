@@ -306,7 +306,6 @@ class _CartScreenState extends State<CartScreen> {
                     separatorBuilder: (ctx, i) => const Divider(height: 1),
                     itemBuilder: (ctx, i) {
                       final item = cart.items[i];
-                      final unitSuffix = _getUnitSuffix(item.product.unit);
 
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -336,7 +335,7 @@ class _CartScreenState extends State<CartScreen> {
                                           borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Text(
-                                          unitSuffix.toUpperCase(),
+                                          item.unitLabel.toUpperCase(),
                                           style: theme.textTheme.labelSmall?.copyWith(
                                             color: theme.colorScheme.onPrimaryContainer,
                                             fontWeight: FontWeight.bold,
@@ -345,7 +344,7 @@ class _CartScreenState extends State<CartScreen> {
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        '${(item.product.sellPrice * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND / $unitSuffix',
+                                        '${(item.effectiveUnitPrice * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND / ${item.unitLabel}',
                                         style: theme.textTheme.bodySmall?.copyWith(
                                           color: theme.colorScheme.onSurfaceVariant,
                                         ),
@@ -381,7 +380,7 @@ class _CartScreenState extends State<CartScreen> {
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
-                                      '${item.quantity} $unitSuffix',
+                                      '${item.quantity} ${item.unitLabel}',
                                       style: theme.textTheme.titleSmall?.copyWith(
                                         fontWeight: FontWeight.bold,
                                       ),

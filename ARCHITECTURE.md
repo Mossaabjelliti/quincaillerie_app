@@ -7,6 +7,8 @@ lib/
 ├── core/
 │   ├── auth/           # AuthService, AuthProvider, UserSession
 │   ├── inventory/      # StockEngine (Event sourcing SUM logic)
+│   ├── l10n/           # AppStrings centralized strings (i18n foundation)
+│   ├── licensing/      # LicenseService, Entitlements, cache
 │   ├── services/       # SyncService (the single bidirectional sync engine)
 │   ├── theme/          # AppTheme, visual design tokens
 │   └── utils/          # Currency formatters, date utilities
@@ -14,15 +16,18 @@ lib/
 │   └── local/          # Drift SQLite database & table definitions
 ├── features/
 │   ├── add_product/    # Product creation & barcode scanner
+│   ├── admin/          # MemberManagementScreen (RBAC)
 │   ├── auth/           # LoginScreen, StoreSelectionScreen
-│   ├── cart/           # POS CartProvider & checkout
+│   ├── cart/           # POS CartProvider & checkout (units/variants aware)
 │   ├── customers/      # CustomerDebtScreen & Ardoise payments
 │   ├── dashboard/      # Analytics & financial metrics
+│   ├── desktop/        # DesktopShell & DesktopPosScreen (Windows)
 │   ├── inventory/      # Product list & UnitVariantDialog
 │   ├── qr_generator/   # Barcode/QR printer
 │   ├── sales/          # Sales history & thermal/A4 printing
 │   ├── scan/           # Quick scanner mode
-│   └── suppliers/      # SupplierManagementScreen
+│   ├── suppliers/      # SupplierManagementScreen
+│   └── sync/           # SyncLogsScreen
 └── main.dart
 ```
 

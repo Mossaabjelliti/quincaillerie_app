@@ -35,8 +35,67 @@ class _DesktopPosScreenState extends State<DesktopPosScreen> {
     setState(() => _matches = rows);
   }
 
-  void _add(Product product) {
-    context.read<CartProvider>().addItem(product);
+  Future<void> _add(Product product) async {
+    final db = context.read<AppDatabase>();
+    final units = await (db.select(db.productUnitConversions)
+          ..where((u) => u.productId.equals(product.id)))
+        .get();
+    final variants = await (db.select(db.productVariants)
+          ..where((v) => v.productId.equals(product.id)))
+        .get();
+
+    if (!mounted) return;
+
+    if (units.isEmpty && variants.isEmpty) {
+      context.read<CartProvider>().addItem(product);
+      _query.clear(); setState(() => _matches = []); _focus.requestFocus();
+      return;
+    }
+
+    ProductUnitConversion? selectedUnit;
+    ProductVariant? selectedVariant;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text('Ajouter — ${product.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (units.isNotEmpty)
+                DropdownButtonFormField<ProductUnitConversion>(
+                  initialValue: selectedUnit,
+                  decoration: const InputDecoration(labelText: 'Unité'),
+                  items: units.map((u) => DropdownMenuItem(value: u, child: Text('${u.unitName} — ${u.sellingPrice.toStringAsFixed(3)} TND'))).toList(),
+                  onChanged: (val) => setDialogState(() => selectedUnit = val),
+                ),
+              if (variants.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<ProductVariant>(
+                  initialValue: selectedVariant,
+                  decoration: const InputDecoration(labelText: 'Variante'),
+                  items: variants.map((v) => DropdownMenuItem(value: v, child: Text('${v.variantName} — ${v.sellPrice.toStringAsFixed(3)} TND'))).toList(),
+                  onChanged: (val) => setDialogState(() => selectedVariant = val),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+            ElevatedButton(
+              onPressed: () {
+                context.read<CartProvider>().addItem(product, 1.0, selectedUnit, selectedVariant);
+                Navigator.pop(ctx);
+              },
+              child: const Text('Ajouter'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) return;
     _query.clear(); setState(() => _matches = []); _focus.requestFocus();
   }
 

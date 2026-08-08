@@ -38,6 +38,25 @@ One important nuance: there are two sync implementations in the repo. The app ac
 | Vente en vrac | respectée | [lib/data/local/database.dart](lib/data/local/database.dart), [lib/features/add_product/add_product_screen.dart](lib/features/add_product/add_product_screen.dart), [lib/features/cart/cart_screen.dart](lib/features/cart/cart_screen.dart) | Product units include piece, meter, kg, and liter, and the cart handles decimal quantities. |
 | Pas de Stripe | respectée | [pubspec.yaml](pubspec.yaml) | No Stripe dependency or integration is present. I found no Stripe code in the repo. |
 
+## Mises à jour récentes (August 2026)
+
+| Domaine | Changement | Fichier(s) |
+|---|---|---|
+| Sécurité | `supabase_schema.sql` renommé en `supabase_schema.legacy.sql` (quarantaine) | repo root |
+| Config | Credentials Supabase externalisés via `--dart-define` + `AppConfig.validateConfig()` | `lib/core/app_config.dart`, `lib/main.dart` |
+| RBAC | Nouveau `MemberManagementScreen` (ajout/changement/retrait membres) câblé dans les shells mobile & desktop | `lib/features/admin/member_management_screen.dart`, `lib/main.dart`, `lib/features/desktop/desktop_shell.dart` |
+| Units/Variants | `CartItem` supporte `unitConversion` + `variant` (prix effectif), sélection dans le scan & le POS desktop | `lib/features/cart/cart_provider.dart`, `lib/features/scan/scan_screen.dart`, `lib/features/desktop/desktop_pos_screen.dart`, `lib/features/cart/cart_screen.dart` |
+| i18n foundation | `AppStrings` centralisé (fr) pour future localisation ar/en | `lib/core/l10n/app_strings.dart`, `lib/main.dart` |
+| Bug fix | Encodage cassé corrigé (« enregistrÃ© » → « enregistré ») | `lib/features/scan/scan_screen.dart` |
+
+## Nouveaux tests ajoutés
+
+| Fichier | Couverture |
+|---|---|
+| `test/cart_unit_variant_test.dart` | Pricing unités/variantes, totaux panier |
+| `test/rbac_member_roles_test.dart` | Permissions RBAC par rôle |
+| `test/app_strings_test.dart` | Fondamentation i18n non-vide |
+
 ## Prochaine étape recommandée
 
 Priorité unique: deploy only the secure Supabase RLS path and remove or quarantine the permissive schema script. This is the highest-risk gap because the repo currently contains both a safe policy set and an insecure one, and shipping the wrong SQL would expose cross-store data.

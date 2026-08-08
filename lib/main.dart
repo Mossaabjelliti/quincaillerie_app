@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 import 'core/app_config.dart';
+import 'core/l10n/app_strings.dart';
 import 'data/local/database.dart';
 import 'services/sync_background.dart';
 import 'services/sync_service.dart';
@@ -26,10 +27,12 @@ import 'features/qr_generator/qr_generator_screen.dart';
 import 'features/customers/customer_debt_screen.dart';
 import 'features/suppliers/supplier_management_screen.dart';
 import 'features/sync/sync_logs_screen.dart';
+import 'features/admin/member_management_screen.dart';
 import 'features/desktop/desktop_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppConfig.validateConfig();
 
   try {
     await Supabase.initialize(
@@ -205,6 +208,16 @@ class _HomeShellState extends State<_HomeShell> {
               Navigator.of(context).pushNamed('/sync-logs');
             },
           ),
+          if (auth.session?.isManager ?? false)
+            IconButton(
+              icon: const Icon(Icons.group_outlined),
+              tooltip: 'Gestion des membres',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MemberManagementScreen()),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: 'Déconnexion',
@@ -215,16 +228,16 @@ class _HomeShellState extends State<_HomeShell> {
       body: screens[_index],
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.sync),
-        label: const Text('Synchroniser'),
+        label: const Text(AppStrings.sync),
         onPressed: () async {
           final syncService = context.read<SyncService>();
           final status = await syncService.syncNow(storeId: widget.storeId);
           if (!context.mounted) return;
           final message = switch (status) {
-            SyncStatus.success => 'Synchronisation réussie',
-            SyncStatus.offline => 'Pas de connexion internet',
-            SyncStatus.failed => 'Échec de la synchronisation',
-            _ => 'Synchronisation en cours...',
+            SyncStatus.success => AppStrings.syncSuccess,
+            SyncStatus.offline => AppStrings.noConnection,
+            SyncStatus.failed => AppStrings.syncFailed,
+            _ => AppStrings.syncInProgress,
           };
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
         },
@@ -233,10 +246,10 @@ class _HomeShellState extends State<_HomeShell> {
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.qr_code_scanner), label: 'Scanner'),
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Inventaire'),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Ventes'),
-          NavigationDestination(icon: Icon(Icons.bar_chart), label: 'Tableau de bord'),
+          NavigationDestination(icon: Icon(Icons.qr_code_scanner), label: AppStrings.tabScanner),
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: AppStrings.tabInventory),
+          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: AppStrings.tabSales),
+          NavigationDestination(icon: Icon(Icons.bar_chart), label: AppStrings.tabDashboard),
         ],
       ),
     );

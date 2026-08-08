@@ -11,6 +11,7 @@ import '../../features/dashboard/dashboard_screen.dart';
 import '../../features/inventory/inventory_screen.dart';
 import '../../features/sales/sales_screen.dart';
 import '../../features/suppliers/supplier_management_screen.dart';
+import '../../features/admin/member_management_screen.dart';
 import '../../services/sync_service.dart';
 
 class DesktopShell extends StatefulWidget {
@@ -29,6 +30,7 @@ class _DesktopShellState extends State<DesktopShell> {
     (label: 'Ventes', icon: Icons.receipt_long_outlined, feature: Feature.sales),
     (label: 'Clients', icon: Icons.people_outline, feature: Feature.customers),
     (label: 'Fournisseurs', icon: Icons.local_shipping_outlined, feature: Feature.suppliers),
+    (label: 'Membres', icon: Icons.group_outlined, feature: Feature.settings),
     (label: 'Rapports', icon: Icons.bar_chart_outlined, feature: Feature.reports),
     (label: 'Paramètres', icon: Icons.settings_outlined, feature: Feature.settings),
   ];
@@ -45,6 +47,10 @@ class _DesktopShellState extends State<DesktopShell> {
       InventoryScreen(storeId: widget.storeId, canManageStock: canManageStock),
       SalesScreen(storeId: widget.storeId, canViewFinancials: canViewFinancials),
       const CustomerDebtScreen(), const SupplierManagementScreen(),
+      if (auth.session?.isManager ?? false)
+        const MemberManagementScreen()
+      else
+        const _DesktopPlaceholder(title: 'Membres', icon: Icons.group_outlined),
       const _DesktopPlaceholder(title: 'Rapports', icon: Icons.bar_chart_outlined),
       const _DesktopPlaceholder(title: 'Paramètres', icon: Icons.settings_outlined),
     ];
