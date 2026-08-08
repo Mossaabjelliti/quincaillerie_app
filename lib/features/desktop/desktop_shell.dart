@@ -5,7 +5,6 @@ import '../../core/auth/auth_provider.dart';
 import '../../core/licensing/entitlement.dart';
 import '../../core/licensing/license_service.dart';
 import '../../core/licensing/license_state.dart';
-import '../../features/cart/cart_screen.dart';
 import '../../features/desktop/desktop_pos_screen.dart';
 import '../../features/customers/customer_debt_screen.dart';
 import '../../features/dashboard/dashboard_screen.dart';

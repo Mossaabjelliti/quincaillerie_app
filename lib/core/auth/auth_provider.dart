@@ -72,7 +72,7 @@ class AuthProvider extends ChangeNotifier {
       String? activeStoreName;
       String activeRole = profileRole ?? 'cashier';
 
-      if (membersRes != null && (membersRes as List).isNotEmpty) {
+      if ((membersRes as List).isNotEmpty) {
         for (final m in membersRes) {
           final sData = m['stores'];
           if (sData != null) {

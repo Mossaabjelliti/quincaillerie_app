@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' hide Column, Table;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../data/local/database.dart';
@@ -24,7 +25,11 @@ class _DesktopPosScreenState extends State<DesktopPosScreen> {
     final term = (value ?? _query.text).trim();
     if (term.isEmpty) return;
     final db = context.read<AppDatabase>();
-    final rows = await (db.select(db.products)..where((p) => p.storeId.equals(widget.storeId) & (p.barcode.equals(term) | p.name.like('%$term%')))..limit(20)).get();
+    final rows = await (db.select(db.products)
+          ..where((p) => p.storeId.equals(widget.storeId))
+          ..where((p) => p.barcode.equals(term) | p.name.like('%$term%'))
+          ..limit(20))
+        .get();
     if (!mounted) return;
     if (rows.length == 1 && rows.first.barcode == term) { _add(rows.first); return; }
     setState(() => _matches = rows);
@@ -48,7 +53,7 @@ class _DesktopPosScreenState extends State<DesktopPosScreen> {
         ])),
         const SizedBox(width: 24), SizedBox(width: 380, child: Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('Panier', style: Theme.of(context).textTheme.titleLarge), const Divider(),
-          Expanded(child: cart.isEmpty ? const Center(child: Text('Panier vide')) : ListView.builder(itemCount: cart.items.length, itemBuilder: (_, index) { final item = cart.items[index]; return ListTile(dense: true, title: Text(item.product.name), subtitle: Text('${item.quantity} × ${item.product.sellPrice.toStringAsFixed(3)}'), trailing: IconButton(icon: const Icon(Icons.remove_circle_outline), onPressed: () => cart.removeItem(item.product.id)); })),
+          Expanded(child: cart.isEmpty ? const Center(child: Text('Panier vide')) : ListView.builder(itemCount: cart.items.length, itemBuilder: (_, index) { final item = cart.items[index]; return ListTile(dense: true, title: Text(item.product.name), subtitle: Text('${item.quantity} × ${item.product.sellPrice.toStringAsFixed(3)}'), trailing: IconButton(icon: const Icon(Icons.remove_circle_outline), onPressed: () => cart.removeItem(item.product.id))); })),
           const Divider(), Text('${cart.totalAmount.toStringAsFixed(3)} TND', textAlign: TextAlign.right, style: Theme.of(context).textTheme.headlineSmall), const SizedBox(height: 12),
           FilledButton.icon(onPressed: cart.isEmpty ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => CartScreen(storeId: widget.storeId, userId: widget.userId))), icon: const Icon(Icons.point_of_sale), label: const Text('Encaisser')),
         ])))),

@@ -23,7 +23,7 @@ class Entitlements {
   );
 
   static const restricted = Entitlements(
-    enabled: Set<Feature>{Feature.dashboard, Feature.sales, Feature.reports, Feature.exports, Feature.settings},
+    enabled: <Feature>{Feature.dashboard, Feature.sales, Feature.reports, Feature.exports, Feature.settings},
     canCreateCommercialOperations: false,
     maxDevices: 0,
     maxStores: 0,

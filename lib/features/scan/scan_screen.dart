@@ -42,7 +42,8 @@ class _ScanScreenState extends State<ScanScreen> {
     try {
       final db = context.read<AppDatabase>();
       final product = await (db.select(db.products)
-            ..where((p) => (p.barcode.equals(code)) & (p.storeId.equals(widget.storeId))))
+            ..where((p) => p.barcode.equals(code))
+            ..where((p) => p.storeId.equals(widget.storeId)))
           .getSingleOrNull();
 
       if (!mounted) return;
