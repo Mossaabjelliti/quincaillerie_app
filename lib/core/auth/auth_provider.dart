@@ -219,14 +219,16 @@ class AuthProvider extends ChangeNotifier {
 
       if (res.user != null) {
         // Create initial store locally & on remote if session active
+        final hasSession = res.session != null;
         await createStore(
           name: storeName,
           ownerId: res.user!.id,
           userFullName: fullName,
           userEmail: email,
+          attemptRemote: hasSession,
         );
 
-        if (res.session == null) {
+        if (!hasSession) {
           // Email confirmation is required by Supabase project
           _errorMessage = 'Compte créé avec succès ! Un e-mail de confirmation vous a été envoyé à $email. Veuillez vérifier votre boîte de réception.';
           _status = AuthStatus.error;
@@ -255,6 +257,7 @@ class AuthProvider extends ChangeNotifier {
     String? phone,
     String? userFullName,
     String? userEmail,
+    bool attemptRemote = true,
   }) async {
     const uuid = Uuid();
     final storeId = uuid.v4();
@@ -282,24 +285,36 @@ class AuthProvider extends ChangeNotifier {
           ),
         );
 
-    try {
-      await authService.supabase.from('stores').insert({
-        'id': storeId,
-        'name': name,
-        'address': address ?? '',
-        'phone': phone ?? '',
-        'owner_id': uid,
-      });
+    if (attemptRemote) {
+      try {
+        await authService.supabase.from('stores').insert({
+          'id': storeId,
+          'name': name,
+          'address': address ?? '',
+          'phone': phone ?? '',
+          'owner_id': uid,
+        });
 
-      await authService.supabase.from('store_members').insert({
-        'id': uuid.v4(),
-        'store_id': storeId,
-        'user_id': uid,
-        'role': 'owner',
-      });
-    } catch (e) {
-      // The local rows remain unsynced and will be retried by the sync engine.
-      debugPrint('Store creation will be synced later: $e');
+        await authService.supabase.from('store_members').insert({
+          'id': uuid.v4(),
+          'store_id': storeId,
+          'user_id': uid,
+          'role': 'owner',
+        });
+      } catch (e) {
+        // The local rows remain unsynced and will be retried by the sync engine.
+        // Log the error to syncLogs using the same pattern as SyncService._logError.
+        await db.into(db.syncLogs).insert(
+              SyncLogsCompanion.insert(
+                id: const Uuid().v4(),
+                targetTable: 'stores',
+                rowId: storeId,
+                action: 'PUSH',
+                errorMessage: e.toString(),
+                createdAt: Value(DateTime.now()),
+              ),
+            );
+      }
     }
 
     await _loadUserSession(uid, userEmail ?? _session?.userEmail ?? '');

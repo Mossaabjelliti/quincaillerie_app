@@ -62,6 +62,20 @@ language sql security definer set search_path = public as $$
   );
 $$;
 
+-- Helper function: Check if current authenticated user is an owner of store
+-- (SECURITY DEFINER avoids 42P17 infinite recursion that the self-referential
+--  EXISTS subquery in the original policy caused on store_members)
+create or replace function public.is_store_owner(lookup_store_id text)
+returns boolean
+language sql security definer set search_path = public as $$
+  select exists (
+    select 1 from public.store_members
+    where store_id::text = lookup_store_id
+    and user_id = auth.uid()
+    and role = 'owner'
+  );
+$$;
+
 -- 4. PRODUCTS TABLE
 create table if not exists public.products (
   id text primary key,
@@ -252,12 +266,11 @@ create policy "Store members can read memberships" on public.store_members
 
 create policy "Store owners can manage memberships" on public.store_members
   for all using (
-    exists (
-      select 1 from public.store_members sm
-      where sm.store_id = store_members.store_id
-      and sm.user_id = auth.uid()
-      and sm.role = 'owner'
-    )
+    public.is_store_owner(store_id::text)
+    or user_id = auth.uid()
+  )
+  with check (
+    public.is_store_owner(store_id::text)
     or user_id = auth.uid()
   );
 
