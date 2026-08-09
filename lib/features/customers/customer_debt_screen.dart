@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/auth/authorization_service.dart';
+import '../../core/auth/permission.dart';
 
 class CustomerDebtScreen extends StatefulWidget {
   const CustomerDebtScreen({super.key});
@@ -28,6 +30,14 @@ class _CustomerDebtScreenState extends State<CustomerDebtScreen> {
   }
 
   void _openAddCustomerModal(BuildContext context) {
+    final authz = context.read<AuthorizationService>();
+    if (!authz.can(Permission.customersManage)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accès restreint: permission insuffisante pour gérer les clients.')),
+      );
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,

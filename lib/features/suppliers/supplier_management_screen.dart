@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/auth/authorization_service.dart';
+import '../../core/auth/permission.dart';
 import '../../core/inventory/stock_engine.dart';
 
 class SupplierManagementScreen extends StatefulWidget {
@@ -31,6 +33,14 @@ class _SupplierManagementScreenState extends State<SupplierManagementScreen> {
   }
 
   void _openAddSupplierModal(BuildContext context) {
+    final authz = context.read<AuthorizationService>();
+    if (!authz.can(Permission.suppliersManage)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accès restreint: permission insuffisante pour gérer les fournisseurs.')),
+      );
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,

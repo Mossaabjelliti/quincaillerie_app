@@ -9,25 +9,24 @@ import 'core/l10n/app_strings.dart';
 import 'data/local/database.dart';
 import 'services/sync_background.dart';
 import 'services/sync_service.dart';
+import 'services/activity_service.dart';
 import 'core/auth/auth_service.dart';
 import 'core/auth/auth_provider.dart';
+import 'core/auth/authorization_service.dart';
+import 'core/navigation/app_navigation.dart';
+import 'core/navigation/route_guard.dart';
 import 'core/licensing/license_repository.dart';
 import 'core/licensing/license_service.dart';
+import 'theme/app_theme.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/store_selection_screen.dart';
-import 'features/scan/scan_screen.dart';
-import 'features/dashboard/dashboard_screen.dart';
-import 'theme/app_theme.dart';
 import 'features/add_product/add_product_screen.dart';
 import 'features/cart/cart_provider.dart';
 import 'features/cart/cart_screen.dart';
-import 'features/inventory/inventory_screen.dart';
-import 'features/sales/sales_screen.dart';
 import 'features/qr_generator/qr_generator_screen.dart';
 import 'features/customers/customer_debt_screen.dart';
 import 'features/suppliers/supplier_management_screen.dart';
 import 'features/sync/sync_logs_screen.dart';
-import 'features/admin/member_management_screen.dart';
 import 'features/desktop/desktop_shell.dart';
 
 Future<void> main() async {
@@ -71,6 +70,17 @@ Future<void> main() async {
         ChangeNotifierProvider<AuthProvider>(
           create: (_) => AuthProvider(authService: authService, db: db),
         ),
+        ChangeNotifierProvider<AuthorizationService>(
+          create: (context) => AuthorizationService(
+            authProvider: context.read<AuthProvider>(),
+          ),
+        ),
+        Provider<ActivityService>(
+          create: (context) => ActivityService(
+            db: context.read<AppDatabase>(),
+            authz: context.read<AuthorizationService>(),
+          ),
+        ),
         ChangeNotifierProvider<CartProvider>(create: (_) => CartProvider()),
         ChangeNotifierProvider<LicenseService>(
           create: (_) => LicenseService(repository: CachedLicenseRepository())..load(),
@@ -94,26 +104,46 @@ class QuincaillerieApp extends StatelessWidget {
         '/add-product': (context) {
           final session = context.read<AuthProvider>().session;
           final barcode = ModalRoute.of(context)?.settings.arguments as String?;
-          return AddProductScreen(
-            storeId: session?.currentStoreId ?? 'demo-store',
-            userId: session?.userId ?? 'demo-user',
-            initialBarcode: barcode,
+          return RouteGuard.guardedRoute(
+            context,
+            routeName: '/add-product',
+            child: AddProductScreen(
+              storeId: session?.currentStoreId ?? 'demo-store',
+              userId: session?.userId ?? 'demo-user',
+              initialBarcode: barcode,
+            ),
           );
         },
         '/cart': (context) {
           final session = context.read<AuthProvider>().session;
-          return CartScreen(
-            storeId: session?.currentStoreId ?? 'demo-store',
-            userId: session?.userId ?? 'demo-user',
+          return RouteGuard.guardedRoute(
+            context,
+            routeName: '/cart',
+            child: CartScreen(
+              storeId: session?.currentStoreId ?? 'demo-store',
+              userId: session?.userId ?? 'demo-user',
+            ),
           );
         },
         '/qr-generator': (context) {
           final product = ModalRoute.of(context)?.settings.arguments as Product?;
           return QrGeneratorScreen(product: product);
         },
-        '/customers': (context) => const CustomerDebtScreen(),
-        '/suppliers': (context) => const SupplierManagementScreen(),
-        '/sync-logs': (context) => const SyncLogsScreen(),
+        '/customers': (context) => RouteGuard.guardedRoute(
+              context,
+              routeName: '/customers',
+              child: const CustomerDebtScreen(),
+            ),
+        '/suppliers': (context) => RouteGuard.guardedRoute(
+              context,
+              routeName: '/suppliers',
+              child: const SupplierManagementScreen(),
+            ),
+        '/sync-logs': (context) => RouteGuard.guardedRoute(
+              context,
+              routeName: '/sync-logs',
+              child: const SyncLogsScreen(),
+            ),
       },
       home: const AuthWrapper(),
     );
@@ -178,15 +208,17 @@ class _HomeShellState extends State<_HomeShell> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final canManageStock = auth.session?.canManageStock ?? true;
-    final canViewFinancials = auth.session?.canViewFinancials ?? true;
-
-    final screens = [
-      ScanScreen(storeId: widget.storeId, userId: widget.userId, canManageStock: canManageStock),
-      InventoryScreen(storeId: widget.storeId, canManageStock: canManageStock),
-      SalesScreen(storeId: widget.storeId, canViewFinancials: canViewFinancials),
-      DashboardScreen(storeId: widget.storeId),
-    ];
+    final authz = context.watch<AuthorizationService>();
+    final destinations = AppNavigation.visibleDestinations(
+      authz,
+      platform: AppNavPlatform.mobile,
+    );
+    final selectedIndex = AppNavigation.clampIndex(_index, destinations.length);
+    final navContext = NavScreenContext(
+      storeId: widget.storeId,
+      userId: widget.userId,
+      authz: authz,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -208,16 +240,6 @@ class _HomeShellState extends State<_HomeShell> {
               Navigator.of(context).pushNamed('/sync-logs');
             },
           ),
-          if (auth.session?.isManager ?? false)
-            IconButton(
-              icon: const Icon(Icons.group_outlined),
-              tooltip: 'Gestion des membres',
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const MemberManagementScreen()),
-                );
-              },
-            ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: 'Déconnexion',
@@ -225,7 +247,9 @@ class _HomeShellState extends State<_HomeShell> {
           ),
         ],
       ),
-      body: screens[_index],
+      body: destinations.isEmpty
+          ? const Center(child: Text('Aucune section accessible pour votre compte.'))
+          : AppNavigation.buildDestination(destinations[selectedIndex], navContext),
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.sync),
         label: const Text(AppStrings.sync),
@@ -242,16 +266,19 @@ class _HomeShellState extends State<_HomeShell> {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
         },
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.qr_code_scanner), label: AppStrings.tabScanner),
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: AppStrings.tabInventory),
-          NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: AppStrings.tabSales),
-          NavigationDestination(icon: Icon(Icons.bar_chart), label: AppStrings.tabDashboard),
-        ],
-      ),
+      bottomNavigationBar: destinations.isEmpty
+          ? null
+          : NavigationBar(
+              selectedIndex: selectedIndex,
+              onDestinationSelected: (i) => setState(() => _index = i),
+              destinations: [
+                for (final destination in destinations)
+                  NavigationDestination(
+                    icon: Icon(destination.icon),
+                    label: destination.label,
+                  ),
+              ],
+            ),
     );
   }
 }

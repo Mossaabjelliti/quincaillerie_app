@@ -15,7 +15,7 @@ class Profiles extends Table {
   TextColumn get id => text()();
   TextColumn get fullName => text().withDefault(const Constant(''))();
   TextColumn get phone => text().withDefault(const Constant(''))();
-  TextColumn get role => text().withDefault(const Constant('owner'))(); // owner, manager, cashier, stock_manager
+  TextColumn get role => text().withDefault(const Constant('owner'))(); // UserRole wire values
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   BoolColumn get synced => boolean().withDefault(const Constant(false))();
 
@@ -255,6 +255,21 @@ class SyncLogs extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+class ActivityLogs extends Table {
+  TextColumn get id => text()();
+  TextColumn get storeId => text()();
+  TextColumn get userId => text()();
+  TextColumn get action => text()();
+  TextColumn get entityType => text()();
+  TextColumn get entityId => text()();
+  DateTimeColumn get timestamp => dateTime().withDefault(currentDateAndTime)();
+  TextColumn get metadata => text().withDefault(const Constant('{}'))();
+  BoolColumn get synced => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @DriftDatabase(tables: [
   Profiles,
   Stores,
@@ -272,9 +287,11 @@ class SyncLogs extends Table {
   Purchases,
   PurchaseItems,
   SyncLogs,
+  ActivityLogs,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(openDatabase());
+  AppDatabase.forTesting(QueryExecutor executor) : super(executor);
 
   @override
   int get schemaVersion => 2;
@@ -346,4 +363,22 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<StoreMember>> unsyncedStoreMembers() =>
       (select(storeMembers)..where((m) => m.synced.equals(false))).get();
+
+  // Activity log queries
+  Future<List<ActivityLog>> getActivitiesForStore(String storeId, {int limit = 100}) =>
+      (select(activityLogs)
+        ..where((a) => a.storeId.equals(storeId))
+        ..orderBy([(a) => OrderingTerm.desc(a.timestamp)])
+        ..limit(limit))
+      .get();
+
+  Future<List<ActivityLog>> getActivitiesForUser(String storeId, String userId, {int limit = 100}) =>
+      (select(activityLogs)
+        ..where((a) => a.storeId.equals(storeId) & a.userId.equals(userId))
+        ..orderBy([(a) => OrderingTerm.desc(a.timestamp)])
+        ..limit(limit))
+      .get();
+
+  Future<List<ActivityLog>> unsyncedActivityLogs() =>
+      (select(activityLogs)..where((a) => a.synced.equals(false))).get();
 }

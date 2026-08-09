@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:quincaillerie_app/core/auth/user_role.dart';
 import 'package:quincaillerie_app/core/auth/user_session.dart';
 import 'package:quincaillerie_app/data/local/database.dart';
 
@@ -21,15 +22,15 @@ void main() {
       phone: '',
       currentStoreId: 'store-a',
       currentStoreName: 'Store A',
-      currentRole: 'cashier',
+      currentRole: UserRole.cashier,
       stores: [_store('store-a'), _store('store-b')],
-      storeRoles: {'store-a': 'cashier', 'store-b': 'manager'},
+      storeRoles: { 'store-a': UserRole.cashier, 'store-b': UserRole.manager },
     );
 
     expect(session.isOwner, isFalse);
     expect(session.canManageStock, isFalse);
     expect(session.canViewFinancials, isFalse);
-    expect(session.roleForStore('store-b'), equals('manager'));
+    expect(session.roleForStore('store-b'), equals(UserRole.manager));
   });
 
   test('store managers inherit stock and finance permissions', () {
@@ -40,9 +41,9 @@ void main() {
       phone: '',
       currentStoreId: 'store-b',
       currentStoreName: 'Store B',
-      currentRole: 'manager',
+      currentRole: UserRole.manager,
       stores: [_store('store-b')],
-      storeRoles: {'store-b': 'manager'},
+      storeRoles: {'store-b': UserRole.manager},
     );
 
     expect(session.canManageStock, isTrue);

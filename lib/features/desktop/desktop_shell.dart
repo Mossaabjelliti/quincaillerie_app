@@ -2,16 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/auth/auth_provider.dart';
-import '../../core/licensing/entitlement.dart';
+import '../../core/auth/authorization_service.dart';
 import '../../core/licensing/license_service.dart';
 import '../../core/licensing/license_state.dart';
-import '../../features/desktop/desktop_pos_screen.dart';
-import '../../features/customers/customer_debt_screen.dart';
-import '../../features/dashboard/dashboard_screen.dart';
-import '../../features/inventory/inventory_screen.dart';
-import '../../features/sales/sales_screen.dart';
-import '../../features/suppliers/supplier_management_screen.dart';
-import '../../features/admin/member_management_screen.dart';
+import '../../core/navigation/app_navigation.dart';
 import '../../services/sync_service.dart';
 
 class DesktopShell extends StatefulWidget {
@@ -23,38 +17,30 @@ class DesktopShell extends StatefulWidget {
 
 class _DesktopShellState extends State<DesktopShell> {
   int _index = 0;
-  static const _items = <({String label, IconData icon, Feature feature})>[
-    (label: 'Dashboard', icon: Icons.dashboard_outlined, feature: Feature.dashboard),
-    (label: 'POS', icon: Icons.point_of_sale_outlined, feature: Feature.pos),
-    (label: 'Inventaire', icon: Icons.inventory_2_outlined, feature: Feature.inventory),
-    (label: 'Ventes', icon: Icons.receipt_long_outlined, feature: Feature.sales),
-    (label: 'Clients', icon: Icons.people_outline, feature: Feature.customers),
-    (label: 'Fournisseurs', icon: Icons.local_shipping_outlined, feature: Feature.suppliers),
-    (label: 'Membres', icon: Icons.group_outlined, feature: Feature.settings),
-    (label: 'Rapports', icon: Icons.bar_chart_outlined, feature: Feature.reports),
-    (label: 'Paramètres', icon: Icons.settings_outlined, feature: Feature.settings),
-  ];
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final authz = context.watch<AuthorizationService>();
     final license = context.watch<LicenseService>().state;
-    final canManageStock = auth.session?.canManageStock ?? false;
-    final canViewFinancials = auth.session?.canViewFinancials ?? false;
-    final screens = <Widget>[
-      DashboardScreen(storeId: widget.storeId),
-      DesktopPosScreen(storeId: widget.storeId, userId: widget.userId),
-      InventoryScreen(storeId: widget.storeId, canManageStock: canManageStock),
-      SalesScreen(storeId: widget.storeId, canViewFinancials: canViewFinancials),
-      const CustomerDebtScreen(), const SupplierManagementScreen(),
-      if (auth.session?.isManager ?? false)
-        const MemberManagementScreen()
-      else
-        const _DesktopPlaceholder(title: 'Membres', icon: Icons.group_outlined),
-      const _DesktopPlaceholder(title: 'Rapports', icon: Icons.bar_chart_outlined),
-      const _DesktopPlaceholder(title: 'Paramètres', icon: Icons.settings_outlined),
-    ];
-    final enabled = license.entitlements.canUse(_items[_index].feature);
+    final destinations = AppNavigation.visibleDestinations(
+      authz,
+      platform: AppNavPlatform.desktop,
+    ).where((destination) {
+      final feature = destination.licenseFeature;
+      return feature == null || license.entitlements.canUse(feature);
+    }).toList(growable: false);
+    final selectedIndex = AppNavigation.clampIndex(_index, destinations.length);
+    final navContext = NavScreenContext(
+      storeId: widget.storeId,
+      userId: widget.userId,
+      authz: authz,
+    );
+    final selected = destinations.isEmpty ? null : destinations[selectedIndex];
+    final licenseBlocked = selected != null &&
+        selected.licenseFeature != null &&
+        !license.entitlements.canUse(selected.licenseFeature!);
+
     return Shortcuts(
       shortcuts: const {SingleActivator(LogicalKeyboardKey.escape): _DismissIntent()},
       child: Actions(
@@ -64,18 +50,30 @@ class _DesktopShellState extends State<DesktopShell> {
           child: Scaffold(
             body: Row(children: [
               NavigationRail(
-                selectedIndex: _index,
+                selectedIndex: selectedIndex,
                 extended: true,
                 minExtendedWidth: 210,
                 leading: Padding(padding: const EdgeInsets.all(16), child: Text('QUINCAILLERIE', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold))),
-                destinations: [for (final item in _items) NavigationRailDestination(icon: Icon(item.icon), label: Text(item.label))],
+                destinations: [
+                  for (final destination in destinations)
+                    NavigationRailDestination(
+                      icon: Icon(destination.icon),
+                      label: Text(destination.label),
+                    ),
+                ],
                 onDestinationSelected: (index) => setState(() => _index = index),
               ),
               const VerticalDivider(width: 1),
               Expanded(child: Column(children: [
                 _DesktopTopBar(storeName: auth.session?.currentStoreName ?? 'Quincaillerie', storeId: widget.storeId, license: license),
                 if (license.shouldShowRenewalWarning) const MaterialBanner(content: Text('Abonnement expiré : fonctionnement hors-ligne temporairement autorisé.'), actions: [SizedBox()]),
-                Expanded(child: enabled ? screens[_index] : const _RestrictedMode()),
+                Expanded(
+                  child: destinations.isEmpty
+                      ? const Center(child: Text('Aucune section accessible pour votre compte.'))
+                      : licenseBlocked
+                          ? const _RestrictedMode()
+                          : AppNavigation.buildDestination(selected!, navContext),
+                ),
               ])),
             ]),
           ),
@@ -98,5 +96,4 @@ class _DesktopTopBar extends StatelessWidget {
 }
 
 class _RestrictedMode extends StatelessWidget { const _RestrictedMode(); @override Widget build(BuildContext context) => const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.lock_outline, size: 48), SizedBox(height: 12), Text('Mode restreint'), Text('Les données restent consultables. Renouvelez la licence pour créer de nouvelles opérations.')])); }
-class _DesktopPlaceholder extends StatelessWidget { final String title; final IconData icon; const _DesktopPlaceholder({required this.title, required this.icon}); @override Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 48), const SizedBox(height: 12), Text('$title bientôt disponible')])); }
 class _DismissIntent extends Intent { const _DismissIntent(); }

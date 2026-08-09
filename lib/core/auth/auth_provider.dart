@@ -4,6 +4,9 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import 'auth_service.dart';
+import 'auth_access.dart';
+import 'permission.dart';
+import 'user_role.dart';
 import 'user_session.dart';
 
 enum AuthStatus {
@@ -27,7 +30,23 @@ class AuthProvider extends ChangeNotifier {
   }
 
   AuthStatus get status => _status;
+
+  /// Signed-in user and active store context; null after logout.
+  UserSession? get currentUser => _session;
+
+  /// Alias for [currentUser]; kept for existing call sites.
   UserSession? get session => _session;
+
+  /// Active store role derived from the current user session.
+  UserRole? get currentRole => AuthAccess.currentRole(_session);
+
+  /// Permissions granted to the active store role.
+  Set<Permission> get permissions => AuthAccess.permissions(_session);
+
+  /// Whether the signed-in user has [permission] in the active store context.
+  bool hasPermission(Permission permission) =>
+      AuthAccess.hasPermission(_session, permission);
+
   String? get errorMessage => _errorMessage;
   bool get isAuthenticated => _status == AuthStatus.authenticated && _session?.hasActiveStore == true;
 
@@ -67,10 +86,10 @@ class AuthProvider extends ChangeNotifier {
       final profileRole = profileRes?['role'] as String?;
 
       List<Store> loadedStores = [];
-      final storeRoles = <String, String>{};
+      final storeRoles = <String, UserRole>{};
       String? activeStoreId;
       String? activeStoreName;
-      String activeRole = profileRole ?? 'cashier';
+      UserRole activeRole = UserRole.fromWire(profileRole);
 
       if ((membersRes as List).isNotEmpty) {
         for (final m in membersRes) {
@@ -86,7 +105,7 @@ class AuthProvider extends ChangeNotifier {
               synced: true,
             );
             loadedStores.add(st);
-            final role = m['role'] as String? ?? 'cashier';
+            final role = UserRole.fromWire(m['role'] as String?);
             storeRoles[st.id] = role;
             await db.into(db.stores).insertOnConflictUpdate(st);
             await db.into(db.storeMembers).insertOnConflictUpdate(
@@ -94,7 +113,7 @@ class AuthProvider extends ChangeNotifier {
                     id: m['id']?.toString() ?? const Uuid().v4(),
                     storeId: st.id,
                     userId: userId,
-                    role: Value(role),
+                    role: Value(role.wireValue),
                     synced: const Value(true),
                   ),
                 );
@@ -105,7 +124,7 @@ class AuthProvider extends ChangeNotifier {
       final localMembers = await (db.select(db.storeMembers)..where((m) => m.userId.equals(userId))).get();
       final localStores = await db.select(db.stores).get();
       for (final member in localMembers) {
-        storeRoles[member.storeId] = member.role;
+        storeRoles[member.storeId] = UserRole.fromWire(member.role);
       }
       for (final ls in localStores.where((store) => storeRoles.containsKey(store.id))) {
         if (!loadedStores.any((s) => s.id == ls.id)) {
@@ -143,26 +162,37 @@ class AuthProvider extends ChangeNotifier {
               id: userId,
               fullName: Value(fullName),
               phone: Value(phone),
-              role: Value(profileRole ?? activeRole),
+              role: Value((profileRole != null ? UserRole.fromWire(profileRole) : activeRole).wireValue),
               synced: const Value(true),
             ),
           );
     } catch (e) {
       final localProfiles = await (db.select(db.profiles)..where((p) => p.id.equals(userId))).get();
       final localMembers = await (db.select(db.storeMembers)..where((m) => m.userId.equals(userId))).get();
-      final localRoles = {for (final member in localMembers) member.storeId: member.role};
+      final localRoles = {
+        for (final member in localMembers) member.storeId: UserRole.fromWire(member.role),
+      };
       final localStores = (await db.select(db.stores).get())
           .where((store) => localRoles.containsKey(store.id))
           .toList();
+
+      final activeStoreId =
+          localStores.isNotEmpty && localRoles.isNotEmpty ? localStores.first.id : null;
+      final activeRole = activeStoreId != null
+          ? (localRoles[activeStoreId] ??
+              UserRole.fromWire(localProfiles.isNotEmpty ? localProfiles.first.role : null))
+          : (localProfiles.isNotEmpty
+              ? UserRole.fromWire(localProfiles.first.role)
+              : UserRole.defaultRole);
 
       _session = UserSession(
         userId: userId,
         userEmail: email,
         fullName: localProfiles.isNotEmpty ? localProfiles.first.fullName : email.split('@').first,
         phone: localProfiles.isNotEmpty ? localProfiles.first.phone : '',
-        currentStoreId: localStores.isNotEmpty && localRoles.isNotEmpty ? localStores.first.id : null,
-        currentStoreName: localStores.isNotEmpty && localRoles.isNotEmpty ? localStores.first.name : null,
-        currentRole: localProfiles.isNotEmpty ? localProfiles.first.role : 'cashier',
+        currentStoreId: activeStoreId,
+        currentStoreName: activeStoreId != null ? localStores.first.name : null,
+        currentRole: activeRole,
         stores: localStores,
         storeRoles: localRoles,
       );
@@ -280,7 +310,7 @@ class AuthProvider extends ChangeNotifier {
             id: uuid.v4(),
             storeId: storeId,
             userId: uid,
-            role: const Value('owner'),
+            role: Value(UserRole.owner.wireValue),
             synced: const Value(false),
           ),
         );
@@ -299,7 +329,7 @@ class AuthProvider extends ChangeNotifier {
           'id': uuid.v4(),
           'store_id': storeId,
           'user_id': uid,
-          'role': 'owner',
+          'role': UserRole.owner.wireValue,
         });
       } catch (e) {
         // The local rows remain unsynced and will be retried by the sync engine.
@@ -339,6 +369,7 @@ class AuthProvider extends ChangeNotifier {
     await authService.signOut();
     _session = null;
     _status = AuthStatus.uninitialized;
+    _errorMessage = null;
     notifyListeners();
   }
 }

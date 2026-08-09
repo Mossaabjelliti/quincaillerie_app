@@ -1,4 +1,7 @@
 import '../../data/local/database.dart';
+import 'permission.dart';
+import 'role_permissions.dart';
+import 'user_role.dart';
 
 class UserSession {
   final String userId;
@@ -7,9 +10,9 @@ class UserSession {
   final String phone;
   final String? currentStoreId;
   final String? currentStoreName;
-  final String currentRole; // 'owner' | 'manager' | 'cashier' | 'stock_manager'
+  final UserRole currentRole;
   final List<Store> stores;
-  final Map<String, String> storeRoles;
+  final Map<String, UserRole> storeRoles;
 
   const UserSession({
     required this.userId,
@@ -25,13 +28,19 @@ class UserSession {
 
   bool get hasActiveStore => currentStoreId != null && currentStoreId!.isNotEmpty;
 
-  bool get isOwner => currentRole == 'owner';
-  bool get isManager => currentRole == 'manager' || isOwner;
-  bool get canManageStock => currentRole == 'stock_manager' || isManager;
-  bool get canPerformSales => true; // All roles can process sales
-  bool get canViewFinancials => isOwner || isManager;
+  /// All permissions granted to the active store role.
+  Set<Permission> get permissions => RolePermissions.forRole(currentRole);
 
-  String roleForStore(String storeId) => storeRoles[storeId] ?? currentRole;
+  bool hasPermission(Permission permission) =>
+      RolePermissions.has(currentRole, permission);
+
+  bool get isOwner => currentRole.isOwner;
+  bool get isManager => currentRole == UserRole.manager || isOwner;
+  bool get canManageStock => hasPermission(Permission.inventoryUpdate);
+  bool get canPerformSales => hasPermission(Permission.salesCreate);
+  bool get canViewFinancials => hasPermission(Permission.reportsFinancial);
+
+  UserRole roleForStore(String storeId) => storeRoles[storeId] ?? currentRole;
 
   UserSession copyWith({
     String? userId,
@@ -40,9 +49,9 @@ class UserSession {
     String? phone,
     String? currentStoreId,
     String? currentStoreName,
-    String? currentRole,
+    UserRole? currentRole,
     List<Store>? stores,
-    Map<String, String>? storeRoles,
+    Map<String, UserRole>? storeRoles,
   }) {
     return UserSession(
       userId: userId ?? this.userId,

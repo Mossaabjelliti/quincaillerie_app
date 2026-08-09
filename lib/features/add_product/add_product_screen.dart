@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../../core/device_identity.dart';
+import '../../core/auth/authorization_service.dart';
+import '../../core/auth/permission.dart';
 
 /// Screen allowing shop owners to register a new product in their local inventory.
 /// Supports both fixed-unit items (pieces) and hardware bulk/cut items (meters, kg, liters).
@@ -102,6 +104,14 @@ class _AddProductScreenState extends State<AddProductScreen> {
 
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
+
+    final authz = context.read<AuthorizationService>();
+    if (!authz.can(Permission.inventoryCreate)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accès restreint: permission insuffisante pour créer un produit.')),
+      );
+      return;
+    }
 
     setState(() => _isSubmitting = true);
 

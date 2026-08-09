@@ -4,6 +4,8 @@ import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../../services/pdf_receipt_service.dart';
 import '../../core/licensing/license_service.dart';
+import '../../core/auth/authorization_service.dart';
+import '../../core/auth/permission.dart';
 import 'cart_provider.dart';
 
 class CartScreen extends StatefulWidget {
@@ -88,6 +90,14 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   Future<void> _handleCheckout() async {
+    final authz = context.read<AuthorizationService>();
+    if (!authz.can(Permission.salesCreate)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accès restreint: permission insuffisante pour enregistrer une vente.')),
+      );
+      return;
+    }
+
     final cart = context.read<CartProvider>();
     if (cart.isEmpty) return;
     if (!context.read<LicenseService>().state.entitlements.canCreateCommercialOperations) {

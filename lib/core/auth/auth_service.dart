@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'user_role.dart';
 
 class AuthService {
   final SupabaseClient supabase;
@@ -23,7 +24,7 @@ class AuthService {
       data: {
         'full_name': fullName,
         'phone': phone ?? '',
-        'role': 'owner',
+        'role': UserRole.owner.wireValue,
       },
     );
     return response;

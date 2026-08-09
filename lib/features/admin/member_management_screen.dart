@@ -4,6 +4,9 @@ import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../data/local/database.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/auth/authorization_service.dart';
+import '../../core/auth/permission.dart';
+import '../../core/auth/user_role.dart';
 
 /// Screen for store owners/managers to manage store members (RBAC).
 /// Operates locally first; rows are pushed to Supabase by the sync engine.
@@ -17,32 +20,33 @@ class MemberManagementScreen extends StatefulWidget {
 class _MemberManagementScreenState extends State<MemberManagementScreen> {
   final _emailController = TextEditingController();
 
-  static const _roles = ['owner', 'manager', 'cashier', 'stock_manager'];
-
   @override
   void dispose() {
     _emailController.dispose();
     super.dispose();
   }
 
-  String _roleLabel(String role) => switch (role) {
-        'owner' => 'Propriétaire',
-        'manager' => 'Gérant',
-        'cashier' => 'Caissier',
-        'stock_manager' => 'Gestionnaire de stock',
-        _ => role,
-      };
+  String _roleLabel(UserRole role) => role.displayLabel;
 
-  IconData _roleIcon(String role) => switch (role) {
-        'owner' => Icons.verified_user_outlined,
-        'manager' => Icons.manage_accounts_outlined,
-        'cashier' => Icons.point_of_sale_outlined,
-        'stock_manager' => Icons.inventory_2_outlined,
-        _ => Icons.person_outline,
+  IconData _roleIcon(UserRole role) => switch (role) {
+        UserRole.owner => Icons.verified_user_outlined,
+        UserRole.employee => Icons.badge_outlined,
+        UserRole.manager => Icons.manage_accounts_outlined,
+        UserRole.cashier => Icons.point_of_sale_outlined,
+        UserRole.stockManager => Icons.inventory_2_outlined,
+        UserRole.accountant => Icons.calculate_outlined,
       };
 
   Future<void> _openAddMemberModal(BuildContext context) async {
-    String? selectedRole = 'cashier';
+    final authz = context.read<AuthorizationService>();
+    if (!authz.can(Permission.employeesManage)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accès restreint: permission insuffisante pour gérer les membres.')),
+      );
+      return;
+    }
+
+    UserRole selectedRole = UserRole.cashier;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -77,15 +81,15 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
+              DropdownButtonFormField<UserRole>(
                 initialValue: selectedRole,
                 decoration: const InputDecoration(
                   labelText: 'Rôle',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.manage_accounts_outlined),
                 ),
-                items: _roles.map((role) {
-                  return DropdownMenuItem<String>(
+                items: UserRole.storeAssignableRoles.map((role) {
+                  return DropdownMenuItem<UserRole>(
                     value: role,
                     child: Row(
                       children: [
@@ -118,7 +122,7 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
                           id: uuid.v4(),
                           storeId: storeId,
                           userId: email,
-                          role: Value(selectedRole ?? 'cashier'),
+                          role: Value(selectedRole.wireValue),
                           synced: const Value(false),
                         ),
                       );
@@ -141,11 +145,20 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
   }
 
   Future<void> _changeRole(StoreMember member) async {
-    final selected = await showDialog<String>(
+    final authz = context.read<AuthorizationService>();
+    if (!authz.can(Permission.employeesManage)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accès restreint: permission insuffisante pour modifier les rôles.')),
+      );
+      return;
+    }
+
+    final memberRole = UserRole.fromWire(member.role);
+    final selected = await showDialog<UserRole>(
       context: context,
       builder: (ctx) => SimpleDialog(
         title: Text('Changer le rôle — ${member.userId}'),
-        children: _roles.map((role) {
+        children: UserRole.storeAssignableRoles.map((role) {
           return SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, role),
             child: Row(
@@ -154,7 +167,7 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
                 const SizedBox(width: 10),
                 Text(_roleLabel(role)),
                 const Spacer(),
-                if (role == member.role)
+                if (role == memberRole)
                   const Icon(Icons.check, size: 18, color: Colors.green),
               ],
             ),
@@ -163,11 +176,11 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
       ),
     );
 
-    if (selected == null || selected == member.role || !mounted) return;
+    if (selected == null || selected == memberRole || !mounted) return;
 
     final db = context.read<AppDatabase>();
     await (db.update(db.storeMembers)..where((m) => m.id.equals(member.id))).write(
-      StoreMembersCompanion(role: Value(selected), synced: const Value(false)),
+      StoreMembersCompanion(role: Value(selected.wireValue), synced: const Value(false)),
     );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -177,6 +190,14 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
   }
 
   Future<void> _removeMember(StoreMember member) async {
+    final authz = context.read<AuthorizationService>();
+    if (!authz.can(Permission.employeesManage)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Accès restreint: permission insuffisante pour retirer des membres.')),
+      );
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -251,6 +272,7 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
             itemBuilder: (context, index) {
               final member = members[index];
               final isSelf = member.userId == currentUserId;
+              final memberRole = UserRole.fromWire(member.role);
 
               return Card(
                 elevation: 2,
@@ -260,7 +282,7 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
                   leading: CircleAvatar(
                     backgroundColor: Colors.amber.shade100,
                     foregroundColor: Colors.amber.shade900,
-                    child: Icon(_roleIcon(member.role)),
+                    child: Icon(_roleIcon(memberRole)),
                   ),
                   title: Text(
                     member.userId,
@@ -268,9 +290,9 @@ class _MemberManagementScreenState extends State<MemberManagementScreen> {
                   ),
                   subtitle: Row(
                     children: [
-                      Icon(_roleIcon(member.role), size: 14),
+                      Icon(_roleIcon(memberRole), size: 14),
                       const SizedBox(width: 4),
-                      Text(_roleLabel(member.role)),
+                      Text(_roleLabel(memberRole)),
                       if (isSelf) ...[
                         const SizedBox(width: 8),
                         const Text('• Vous', style: TextStyle(color: Colors.green)),
