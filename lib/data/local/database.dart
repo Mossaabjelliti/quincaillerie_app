@@ -381,4 +381,147 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<ActivityLog>> unsyncedActivityLogs() =>
       (select(activityLogs)..where((a) => a.synced.equals(false))).get();
+
+  // -----------------------------------------------------------------------
+  // DASHBOARD AGGREGATE QUERIES
+  // -----------------------------------------------------------------------
+
+  /// Today's total sales revenue for [storeId].
+  Future<double> getTodaySalesRevenue(String storeId) async {
+    final now = DateTime.now();
+    final startOfDay = DateTime(now.year, now.month, now.day);
+    final sumTotal = sales.total.sum();
+    final row = await (selectOnly(sales)
+          ..where(sales.storeId.equals(storeId) & sales.createdAt.isBiggerOrEqualValue(startOfDay))
+          ..addColumns([sumTotal]))
+        .getSingle();
+    return row.read(sumTotal) ?? 0.0;
+  }
+
+  /// Current week's total sales revenue for [storeId].
+  Future<double> getWeeklySalesRevenue(String storeId) async {
+    final now = DateTime.now();
+    final startOfWeek = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+    final sumTotal = sales.total.sum();
+    final row = await (selectOnly(sales)
+          ..where(sales.storeId.equals(storeId) & sales.createdAt.isBiggerOrEqualValue(startOfWeek))
+          ..addColumns([sumTotal]))
+        .getSingle();
+    return row.read(sumTotal) ?? 0.0;
+  }
+
+  /// Current month's total sales revenue for [storeId].
+  Future<double> getMonthlySalesRevenue(String storeId) async {
+    final now = DateTime.now();
+    final startOfMonth = DateTime(now.year, now.month, 1);
+    final sumTotal = sales.total.sum();
+    final row = await (selectOnly(sales)
+          ..where(sales.storeId.equals(storeId) & sales.createdAt.isBiggerOrEqualValue(startOfMonth))
+          ..addColumns([sumTotal]))
+        .getSingle();
+    return row.read(sumTotal) ?? 0.0;
+  }
+
+  /// Total count of completed sales transactions for [storeId].
+  Future<int> getSalesTransactionCount(String storeId) async {
+    final countExpr = sales.id.count();
+    final row = await (selectOnly(sales)
+          ..where(sales.storeId.equals(storeId))
+          ..addColumns([countExpr]))
+        .getSingle();
+    return row.read(countExpr) ?? 0;
+  }
+
+  /// Sales revenue breakdown grouped by payment method (cash, check, credit) for [storeId].
+  Future<Map<PaymentMethod, double>> getPaymentMethodBreakdown(String storeId) async {
+    final sumTotal = sales.total.sum();
+    final rows = await (selectOnly(sales)
+          ..where(sales.storeId.equals(storeId))
+          ..addColumns([sales.paymentMethod, sumTotal])
+          ..groupBy([sales.paymentMethod]))
+        .get();
+
+    final breakdown = <PaymentMethod, double>{};
+    for (final row in rows) {
+      final rawMethod = row.read(sales.paymentMethod);
+      final total = row.read(sumTotal) ?? 0.0;
+      if (rawMethod != null && rawMethod >= 0 && rawMethod < PaymentMethod.values.length) {
+        final method = PaymentMethod.values[rawMethod];
+        breakdown[method] = total;
+      }
+    }
+    return breakdown;
+  }
+
+  /// Total count of sales completed by an individual employee for [storeId].
+  Future<int> getEmployeeSalesCount(String storeId, String userId) async {
+    final countExpr = sales.id.count();
+    final row = await (selectOnly(sales)
+          ..where(sales.storeId.equals(storeId) & sales.userId.equals(userId))
+          ..addColumns([countExpr]))
+        .getSingle();
+    return row.read(countExpr) ?? 0;
+  }
+
+  /// Total count of products registered in store catalog for [storeId].
+  Future<int> getProductCount(String storeId) async {
+    final countExpr = products.id.count();
+    final row = await (selectOnly(products)
+          ..where(products.storeId.equals(storeId))
+          ..addColumns([countExpr]))
+        .getSingle();
+    return row.read(countExpr) ?? 0;
+  }
+
+  /// Estimated catalog valuation (quantity * sell_price) for [storeId].
+  Future<double> getStockValuation(String storeId) async {
+    final valuationExpr = CustomExpression<double>('SUM(quantity * sell_price)');
+    final row = await (selectOnly(products)
+          ..where(products.storeId.equals(storeId))
+          ..addColumns([valuationExpr]))
+        .getSingle();
+    return row.read(valuationExpr) ?? 0.0;
+  }
+
+  /// Count of products with stock <= lowStockThreshold for [storeId].
+  Future<int> getLowStockCount(String storeId) async {
+    final countExpr = products.id.count();
+    final row = await (selectOnly(products)
+          ..where(products.storeId.equals(storeId) &
+              products.quantity.isSmallerOrEqual(products.lowStockThreshold))
+          ..addColumns([countExpr]))
+        .getSingle();
+    return row.read(countExpr) ?? 0;
+  }
+
+  /// Count of products with quantity == 0 for [storeId].
+  Future<int> getOutOfStockCount(String storeId) async {
+    final countExpr = products.id.count();
+    final row = await (selectOnly(products)
+          ..where(products.storeId.equals(storeId) & products.quantity.equals(0))
+          ..addColumns([countExpr]))
+        .getSingle();
+    return row.read(countExpr) ?? 0;
+  }
+
+  /// Total outstanding customer debt balance for [storeId].
+  Future<double> getTotalOutstandingDebt(String storeId) async {
+    final sumRemaining = customerDebts.remainingAmount.sum();
+    final row = await (selectOnly(customerDebts)
+          ..where(customerDebts.storeId.equals(storeId))
+          ..addColumns([sumRemaining]))
+        .getSingle();
+    return row.read(sumRemaining) ?? 0.0;
+  }
+
+  /// Total count of unpaid/partially-paid customer debts for [storeId].
+  Future<int> getUnpaidDebtCount(String storeId) async {
+    final countExpr = customerDebts.id.count();
+    final row = await (selectOnly(customerDebts)
+          ..where(customerDebts.storeId.equals(storeId) &
+              customerDebts.remainingAmount.isBiggerThanValue(0))
+          ..addColumns([countExpr]))
+        .getSingle();
+    return row.read(countExpr) ?? 0;
+  }
 }

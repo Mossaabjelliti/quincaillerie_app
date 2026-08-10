@@ -28,6 +28,8 @@ import 'features/customers/customer_debt_screen.dart';
 import 'features/suppliers/supplier_management_screen.dart';
 import 'features/sync/sync_logs_screen.dart';
 import 'features/desktop/desktop_shell.dart';
+import 'services/dashboard_service.dart';
+import 'features/dashboard/dashboard_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -79,6 +81,18 @@ Future<void> main() async {
           create: (context) => ActivityService(
             db: context.read<AppDatabase>(),
             authz: context.read<AuthorizationService>(),
+          ),
+        ),
+        Provider<DashboardService>(
+          create: (context) => DashboardService(
+            db: context.read<AppDatabase>(),
+            authorizationService: context.read<AuthorizationService>(),
+          ),
+        ),
+        ChangeNotifierProvider<DashboardProvider>(
+          create: (context) => DashboardProvider(
+            dashboardService: context.read<DashboardService>(),
+            authorizationService: context.read<AuthorizationService>(),
           ),
         ),
         ChangeNotifierProvider<CartProvider>(create: (_) => CartProvider()),
