@@ -530,86 +530,150 @@ class _InventoryScreenState extends State<InventoryScreen> {
                             ),
                             const Divider(height: 20),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'En stock',
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: theme.colorScheme.onSurfaceVariant,
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'En stock',
+                                              style: theme.textTheme.labelSmall?.copyWith(
+                                                color: theme.colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                            Text(
+                                              '${p.quantity} $unitSuffix',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.titleMedium?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                                color: isLowStock ? Colors.orange.shade900 : Colors.green.shade700,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                    Text(
-                                      '${p.quantity} $unitSuffix',
-                                      style: theme.textTheme.titleMedium?.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                        color: isLowStock ? Colors.orange.shade900 : Colors.green.shade700,
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Prix de vente',
+                                              style: theme.textTheme.labelSmall?.copyWith(
+                                                color: theme.colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                            Text(
+                                              '${p.sellPrice.toStringAsFixed(3)} TND',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.titleMedium?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                                color: theme.colorScheme.primary,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                const SizedBox(width: 4),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
-                                      'Prix de vente',
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: theme.colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                    Text(
-                                      '${p.sellPrice.toStringAsFixed(3)} TND',
-                                      style: theme.textTheme.titleMedium?.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                        color: theme.colorScheme.primary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                Wrap(
-                                  alignment: WrapAlignment.end,
-                                  spacing: 0,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.qr_code, size: 20),
-                                      tooltip: 'Code QR',
-                                      onPressed: () {
-                                        Navigator.of(context).pushNamed(
-                                          '/qr-generator',
-                                          arguments: p,
-                                        );
-                                      },
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.qr_code_scanner_outlined, size: 20),
-                                      tooltip: 'Unités & variantes',
-                                      onPressed: widget.canManageStock
-                                          ? () => showDialog(
-                                                context: context,
-                                                builder: (_) => UnitVariantDialog(product: p),
-                                              )
-                                          : null,
-                                    ),
-                                    if (widget.canManageStock)
-                                      IconButton(
-                                        icon: const Icon(Icons.fact_check_outlined, size: 20),
-                                        tooltip: 'Comptage physique',
-                                        onPressed: () => _showPhysicalCountDialog(p),
-                                      ),
                                     if (widget.canManageStock)
                                       IconButton(
                                         icon: const Icon(Icons.edit_outlined, size: 20),
                                         tooltip: 'Modifier',
+                                        visualDensity: VisualDensity.compact,
+                                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                                        padding: const EdgeInsets.all(6),
                                         onPressed: () => _showEditProductDialog(p),
                                       ),
-                                    if (widget.canManageStock)
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
-                                        tooltip: 'Supprimer',
-                                        onPressed: () => _deleteProduct(p),
-                                      ),
+                                    PopupMenuButton<String>(
+                                      icon: const Icon(Icons.more_vert, size: 20),
+                                      tooltip: 'Actions',
+                                      padding: const EdgeInsets.all(6),
+                                      onSelected: (action) {
+                                        switch (action) {
+                                          case 'qr':
+                                            Navigator.of(context).pushNamed(
+                                              '/qr-generator',
+                                              arguments: p,
+                                            );
+                                            break;
+                                          case 'units':
+                                            if (widget.canManageStock) {
+                                              showDialog(
+                                                context: context,
+                                                builder: (_) => UnitVariantDialog(product: p),
+                                              );
+                                            }
+                                            break;
+                                          case 'count':
+                                            if (widget.canManageStock) {
+                                              _showPhysicalCountDialog(p);
+                                            }
+                                            break;
+                                          case 'delete':
+                                            if (widget.canManageStock) {
+                                              _deleteProduct(p);
+                                            }
+                                            break;
+                                        }
+                                      },
+                                      itemBuilder: (ctx) => [
+                                        const PopupMenuItem(
+                                          value: 'qr',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.qr_code, size: 18),
+                                              SizedBox(width: 8),
+                                              Text('Code QR'),
+                                            ],
+                                          ),
+                                        ),
+                                        if (widget.canManageStock) ...[
+                                          const PopupMenuItem(
+                                            value: 'units',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.qr_code_scanner_outlined, size: 18),
+                                                SizedBox(width: 8),
+                                                Text('Unités & variantes'),
+                                              ],
+                                            ),
+                                          ),
+                                          const PopupMenuItem(
+                                            value: 'count',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.fact_check_outlined, size: 18),
+                                                SizedBox(width: 8),
+                                                Text('Comptage physique'),
+                                              ],
+                                            ),
+                                          ),
+                                          const PopupMenuDivider(),
+                                          const PopupMenuItem(
+                                            value: 'delete',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                                                SizedBox(width: 8),
+                                                Text('Supprimer', style: TextStyle(color: Colors.red)),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ],

@@ -325,12 +325,12 @@ class AuthProvider extends ChangeNotifier {
           'owner_id': uid,
         });
 
-        await authService.supabase.from('store_members').insert({
+        await authService.supabase.from('store_members').upsert({
           'id': uuid.v4(),
           'store_id': storeId,
           'user_id': uid,
           'role': UserRole.owner.wireValue,
-        });
+        }, onConflict: 'store_id,user_id');
       } catch (e) {
         // The local rows remain unsynced and will be retried by the sync engine.
         // Log the error to syncLogs using the same pattern as SyncService._logError.

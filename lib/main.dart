@@ -13,6 +13,7 @@ import 'services/activity_service.dart';
 import 'core/auth/auth_service.dart';
 import 'core/auth/auth_provider.dart';
 import 'core/auth/authorization_service.dart';
+import 'core/auth/permission.dart';
 import 'core/navigation/app_navigation.dart';
 import 'core/navigation/route_guard.dart';
 import 'core/licensing/license_repository.dart';
@@ -28,6 +29,7 @@ import 'features/customers/customer_debt_screen.dart';
 import 'features/suppliers/supplier_management_screen.dart';
 import 'features/sync/sync_logs_screen.dart';
 import 'features/desktop/desktop_shell.dart';
+import 'features/scan/scan_screen.dart';
 import 'services/dashboard_service.dart';
 import 'features/dashboard/dashboard_provider.dart';
 
@@ -139,6 +141,19 @@ class QuincaillerieApp extends StatelessWidget {
             ),
           );
         },
+        '/scanner': (context) {
+          final session = context.read<AuthProvider>().session;
+          final authz = context.read<AuthorizationService>();
+          return RouteGuard.guardedRoute(
+            context,
+            routeName: '/scanner',
+            child: ScanScreen(
+              storeId: session?.currentStoreId ?? 'demo-store',
+              userId: session?.userId ?? 'demo-user',
+              canManageStock: authz.can(Permission.inventoryUpdate),
+            ),
+          );
+        },
         '/qr-generator': (context) {
           final product = ModalRoute.of(context)?.settings.arguments as Product?;
           return QrGeneratorScreen(product: product);
@@ -238,48 +253,105 @@ class _HomeShellState extends State<_HomeShell> {
       appBar: AppBar(
         title: Text(auth.session?.currentStoreName ?? 'Quincaillerie'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.swap_horiz_rounded),
-            tooltip: 'Changer de magasin',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const StoreSelectionScreen()),
+          Consumer<SyncService>(
+            builder: (context, sync, _) {
+              final isSyncing = sync.status == SyncStatus.syncing;
+              return IconButton(
+                icon: isSyncing
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        sync.status == SyncStatus.offline
+                            ? Icons.sync_disabled_rounded
+                            : Icons.sync_rounded,
+                        color: sync.status == SyncStatus.offline ? Colors.orange : null,
+                      ),
+                tooltip: isSyncing
+                    ? 'Synchronisation en cours...'
+                    : (sync.status == SyncStatus.offline
+                        ? 'Hors ligne - appuyer pour réessayer'
+                        : 'Synchroniser'),
+                onPressed: isSyncing
+                    ? null
+                    : () async {
+                        final status = await sync.syncNow(storeId: widget.storeId);
+                        if (!context.mounted) return;
+                        final message = switch (status) {
+                          SyncStatus.success => AppStrings.syncSuccess,
+                          SyncStatus.offline => AppStrings.noConnection,
+                          SyncStatus.failed => AppStrings.syncFailed,
+                          _ => AppStrings.syncInProgress,
+                        };
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(message),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
               );
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.sync_problem_rounded),
-            tooltip: 'Logs de Synchronisation',
-            onPressed: () {
-              Navigator.of(context).pushNamed('/sync-logs');
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Options',
+            onSelected: (val) {
+              switch (val) {
+                case 'stores':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const StoreSelectionScreen()),
+                  );
+                  break;
+                case 'sync_logs':
+                  Navigator.of(context).pushNamed('/sync-logs');
+                  break;
+                case 'logout':
+                  auth.signOut();
+                  break;
+              }
             },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: 'Déconnexion',
-            onPressed: () => auth.signOut(),
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'stores',
+                child: Row(
+                  children: [
+                    Icon(Icons.swap_horiz_rounded, size: 20),
+                    SizedBox(width: 12),
+                    Text('Changer de magasin'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'sync_logs',
+                child: Row(
+                  children: [
+                    Icon(Icons.sync_problem_rounded, size: 20),
+                    SizedBox(width: 12),
+                    Text('Logs de synchronisation'),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(Icons.logout_rounded, size: 20, color: Colors.red),
+                    SizedBox(width: 12),
+                    Text('Déconnexion', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
       body: destinations.isEmpty
           ? const Center(child: Text('Aucune section accessible pour votre compte.'))
           : AppNavigation.buildDestination(destinations[selectedIndex], navContext),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.sync),
-        label: const Text(AppStrings.sync),
-        onPressed: () async {
-          final syncService = context.read<SyncService>();
-          final status = await syncService.syncNow(storeId: widget.storeId);
-          if (!context.mounted) return;
-          final message = switch (status) {
-            SyncStatus.success => AppStrings.syncSuccess,
-            SyncStatus.offline => AppStrings.noConnection,
-            SyncStatus.failed => AppStrings.syncFailed,
-            _ => AppStrings.syncInProgress,
-          };
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-        },
-      ),
       bottomNavigationBar: destinations.isEmpty
           ? null
           : NavigationBar(

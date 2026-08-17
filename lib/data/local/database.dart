@@ -143,9 +143,43 @@ class SaleItems extends Table {
   RealColumn get quantity => real()();
   RealColumn get unitPrice => real()();
   RealColumn get subtotal => real()();
+  // Historical snapshots so receipts/invoices survive product renames.
+  TextColumn get productName => text().withDefault(const Constant(''))();
+  TextColumn get unitLabel => text().withDefault(const Constant(''))();
 
   @override
   Set<Column> get primaryKey => {id};
+}
+
+@TableIndex(name: 'invoices_store_id_idx', columns: {#storeId})
+@TableIndex(name: 'invoices_sale_id_idx', columns: {#saleId}, unique: true)
+@TableIndex(name: 'invoices_store_number_idx', columns: {#storeId, #invoiceNumber}, unique: true)
+class Invoices extends Table {
+  TextColumn get id => text()();
+  TextColumn get storeId => text()();
+  TextColumn get saleId => text().unique().references(Sales, #id)();
+  TextColumn get invoiceNumber => text()();
+  TextColumn get status => text().withDefault(const Constant('ISSUED'))(); // DRAFT | ISSUED | PAID | VOID
+  DateTimeColumn get issuedAt => dateTime()();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  BoolColumn get synced => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Local per-store, per-year invoice counter used to allocate a provisional
+/// invoice number (INV-YYYY-NNNN) during offline checkout. The authoritative
+/// number is always allocated server-side by `next_invoice_number()` when the
+/// sale is pushed; this local counter only guarantees a unique, non-MAX()+1
+/// provisional number while offline.
+class LocalInvoiceSequences extends Table {
+  TextColumn get storeId => text()();
+  IntColumn get year => integer()();
+  IntColumn get lastValue => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {storeId, year};
 }
 
 class Customers extends Table {
@@ -280,6 +314,8 @@ class ActivityLogs extends Table {
   ProductVariants,
   Sales,
   SaleItems,
+  Invoices,
+  LocalInvoiceSequences,
   Customers,
   CustomerDebts,
   DebtPayments,
@@ -294,7 +330,32 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(QueryExecutor executor) : super(executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onUpgrade: (migrator, from, to) async {
+          // v1 shipped schemaVersion 1. v2 added multi-tenant/auth/sales tables.
+          // For installations still at v1, create the full v2 baseline first,
+          // then apply the v3 changes below (idempotent per step).
+          if (from < 2) {
+            await migrator.createAll();
+          }
+          // v3: add historical snapshot columns to sale_items and create the
+          // invoices table. addColumn/createTable are no-ops if the object
+          // already exists, so replaying the migration is safe.
+          if (from < 3) {
+            await migrator.addColumn(saleItems, saleItems.productName);
+            await migrator.addColumn(saleItems, saleItems.unitLabel);
+            await migrator.createTable(invoices);
+          }
+          // v4: add the local invoice counter table used to allocate a unique
+          // provisional invoice number during offline checkout.
+          if (from < 4) {
+            await migrator.createTable(localInvoiceSequences);
+          }
+        },
+      );
 
   // Convenience queries
   Future<List<Product>> allProducts(String storeId) =>

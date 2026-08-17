@@ -42,6 +42,14 @@ class _ScanScreenState extends State<ScanScreen> {
     final code = rawCode.trim();
     if (code.isEmpty || _handling) return;
 
+    final lower = code.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://') || lower.startsWith('www.')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Code invalide: les liens URL ne sont pas acceptés comme code-barres.')),
+      );
+      return;
+    }
+
     setState(() => _handling = true);
 
     try {

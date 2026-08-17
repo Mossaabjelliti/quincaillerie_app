@@ -164,7 +164,8 @@ class CartProvider extends ChangeNotifier {
         final movementId = '$saleId:${item.product.id}';
         final unitPrice = item.effectiveUnitPrice * priceMultiplier;
 
-        // 2. Insert SaleItem record
+        // 2. Insert SaleItem record (with historical snapshots so invoices
+        //    survive product renames).
         await db.into(db.saleItems).insert(
               SaleItemsCompanion.insert(
                 id: saleItemId,
@@ -173,6 +174,8 @@ class CartProvider extends ChangeNotifier {
                 quantity: item.quantity,
                 unitPrice: unitPrice,
                 subtotal: unitPrice * item.quantity,
+                productName: Value(item.product.name),
+                unitLabel: Value(item.unitLabel),
               ),
             );
 
@@ -217,6 +220,40 @@ class CartProvider extends ChangeNotifier {
           );
         }
       }
+
+      // 5. Create the invoice atomically with the sale. The number is a
+      //    provisional local allocation (INV-YYYY-NNNN) using an atomic
+      //    INSERT ... ON CONFLICT ... RETURNING on the per-store, per-year
+      //    counter — never MAX()+1, never a client-supplied number. The
+      //    authoritative number is re-allocated server-side by
+      //    next_invoice_number() when the sale is pushed. The invoice id
+      //    equals the sale id because the relationship is 1:1.
+      final year = now.year;
+      final seqRow = await db.customSelect(
+        '''
+        INSERT INTO local_invoice_sequences (store_id, year, last_value)
+        VALUES (?, ?, 1)
+        ON CONFLICT (store_id, year)
+        DO UPDATE SET last_value = local_invoice_sequences.last_value + 1
+        RETURNING last_value
+        ''',
+        variables: [Variable.withString(storeId), Variable.withInt(year)],
+      ).getSingle();
+      final seqValue = seqRow.read<int>('last_value');
+      final invoiceNumber = 'INV-$year-${seqValue.toString().padLeft(4, '0')}';
+
+      await db.into(db.invoices).insert(
+            InvoicesCompanion.insert(
+              id: saleId,
+              storeId: storeId,
+              saleId: saleId,
+              invoiceNumber: invoiceNumber,
+              status: const Value('ISSUED'),
+              issuedAt: now,
+              createdAt: Value(now),
+              synced: const Value(false),
+            ),
+          );
 
       // The cache participates in the same commit as the sale. If this fails,
       // the business transaction rolls back instead of looking failed after a

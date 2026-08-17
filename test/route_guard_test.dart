@@ -64,7 +64,10 @@ void main() {
     test('maps named routes to required permissions', () {
       expect(RouteProtection.permissionForRoute('/sync-logs'), Permission.activityView);
       expect(RouteProtection.permissionForRoute('/cart'), Permission.salesCreate);
+      expect(RouteProtection.permissionForRoute('/scanner'), Permission.salesCreate);
       expect(RouteProtection.permissionForRoute('/add-product'), Permission.inventoryCreate);
+      expect(RouteProtection.permissionForRoute('/customers'), Permission.customersView);
+      expect(RouteProtection.permissionForRoute('/suppliers'), Permission.suppliersView);
       expect(RouteProtection.permissionForRoute('/unknown'), isNull);
     });
   });

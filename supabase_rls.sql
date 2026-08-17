@@ -130,7 +130,9 @@ create table if not exists public.sale_items (
   product_id text references public.products(id) on delete cascade,
   quantity numeric not null,
   unit_price numeric not null,
-  subtotal numeric not null
+  subtotal numeric not null,
+  product_name text not null default '',
+  unit_label text not null default ''
 );
 
 -- 8. SUPPLIERS TABLE
@@ -177,7 +179,21 @@ create table if not exists public.customers (
   created_at timestamptz default now()
 );
 
--- 12. CUSTOMER DEBTS TABLE
+-- 12. INVOICES TABLE (1:1 with sales; sale remains source of truth)
+create table if not exists public.invoices (
+  id text primary key,
+  store_id text not null,
+  sale_id text unique references public.sales(id) on delete cascade,
+  invoice_number text not null,
+  status text not null default 'ISSUED', -- 'DRAFT' | 'ISSUED' | 'PAID' | 'VOID'
+  issued_at timestamptz not null,
+  created_at timestamptz default now(),
+  unique (store_id, invoice_number)
+);
+create index if not exists invoices_store_id_idx on public.invoices (store_id);
+create index if not exists invoices_sale_id_idx on public.invoices (sale_id);
+
+-- 13. CUSTOMER DEBTS TABLE
 create table if not exists public.customer_debts (
   id text primary key,
   store_id text not null,
@@ -191,7 +207,7 @@ create table if not exists public.customer_debts (
   created_at timestamptz default now()
 );
 
--- 13. DEBT PAYMENTS TABLE
+-- 14. DEBT PAYMENTS TABLE
 create table if not exists public.debt_payments (
   id text primary key,
   store_id text not null,
@@ -203,7 +219,7 @@ create table if not exists public.debt_payments (
   created_at timestamptz default now()
 );
 
--- 14. PRODUCT UNITS TABLE
+-- 15. PRODUCT UNITS TABLE
 create table if not exists public.product_units (
   id text primary key,
   store_id text not null,
@@ -213,7 +229,7 @@ create table if not exists public.product_units (
   selling_price numeric default 0
 );
 
--- 15. PRODUCT VARIANTS TABLE
+-- 16. PRODUCT VARIANTS TABLE
 create table if not exists public.product_variants (
   id text primary key,
   store_id text not null,
@@ -241,6 +257,7 @@ alter table public.suppliers enable row level security;
 alter table public.purchase_orders enable row level security;
 alter table public.purchase_items enable row level security;
 alter table public.customers enable row level security;
+alter table public.invoices enable row level security;
 alter table public.customer_debts enable row level security;
 alter table public.debt_payments enable row level security;
 alter table public.product_units enable row level security;
@@ -317,6 +334,10 @@ create policy "Store members purchase items policy" on public.purchase_items
 
 -- Customers
 create policy "Store members customers policy" on public.customers
+  for all using (public.is_store_member(store_id)) with check (public.is_store_member(store_id));
+
+-- Invoices
+create policy "Store members invoices policy" on public.invoices
   for all using (public.is_store_member(store_id)) with check (public.is_store_member(store_id));
 
 -- Customer Debts
@@ -421,10 +442,11 @@ begin
 
   for v_line in select value from jsonb_array_elements(p_items)
   loop
-    insert into public.sale_items (id, sale_id, product_id, quantity, unit_price, subtotal)
+    insert into public.sale_items (id, sale_id, product_id, quantity, unit_price, subtotal, product_name, unit_label)
     values (
       v_line->>'id', v_sale_id, v_line->>'product_id', (v_line->>'quantity')::numeric,
-      (v_line->>'unit_price')::numeric, (v_line->>'subtotal')::numeric
+      (v_line->>'unit_price')::numeric, (v_line->>'subtotal')::numeric,
+      coalesce(v_line->>'product_name', ''), coalesce(v_line->>'unit_label', '')
     );
     insert into public.stock_movements (id, product_id, store_id, user_id, device_id, type, quantity, note, created_at)
     values (
@@ -449,6 +471,19 @@ begin
   elsif p_sale->>'payment_method' = 'credit' then
     raise exception 'Credit sale requires debt payload';
   end if;
+
+  -- Invoice is created atomically with the sale. The number is allocated
+  -- server-side by next_invoice_number() (never MAX()+1, never client-supplied).
+  -- The invoice id equals the sale id because the relationship is 1:1, which
+  -- also makes the whole document idempotent: a retry returns early above.
+  insert into public.invoices (id, store_id, sale_id, invoice_number, status, issued_at, created_at)
+  values (
+    v_sale_id, v_store_id, v_sale_id,
+    public.next_invoice_number(v_store_id),
+    'ISSUED',
+    coalesce((p_sale->>'created_at')::timestamptz, now()),
+    now()
+  );
 
   return jsonb_build_object('id', v_sale_id, 'status', 'committed');
 end;

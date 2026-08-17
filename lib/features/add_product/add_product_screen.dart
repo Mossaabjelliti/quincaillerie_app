@@ -283,6 +283,16 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   if (val == null || val.trim().isEmpty) {
                     return 'Veuillez saisir un code-barres';
                   }
+                  final trimmed = val.trim();
+                  final lower = trimmed.toLowerCase();
+                  if (lower.startsWith('http://') ||
+                      lower.startsWith('https://') ||
+                      lower.startsWith('www.') ||
+                      lower.contains('rawpixel') ||
+                      lower.contains('.com/') ||
+                      lower.contains('.shop/')) {
+                    return 'Le code-barres ne peut pas être un lien URL ou une adresse web';
+                  }
                   return null;
                 },
               ),

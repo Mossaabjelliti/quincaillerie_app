@@ -278,31 +278,64 @@ class _CartScreenState extends State<CartScreen> {
           : Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
                   child: Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.person_outline),
-                      title: Text(cart.customerName ?? 'Client passage'),
-                      subtitle: Text(
-                        _regularPricing ? 'Tarif régulier appliqué' : 'Tarif passage appliqué',
-                      ),
-                      trailing: Wrap(
-                        spacing: 8,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                      child: Column(
                         children: [
-                          TextButton(
-                            onPressed: () => _showCustomerPicker(cart),
-                            child: Text(cart.customerId == null ? 'Choisir client' : 'Changer'),
+                          Row(
+                            children: [
+                              const Icon(Icons.person_outline, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  cart.customerName ?? 'Client passage',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                ),
+                                onPressed: () => _showCustomerPicker(cart),
+                                child: Text(cart.customerId == null ? 'Choisir client' : 'Changer'),
+                              ),
+                            ],
                           ),
-                          Switch(
-                            value: _regularPricing,
-                            onChanged: (value) {
-                              setState(() => _regularPricing = value);
-                              cart.setCustomer(
-                                customerId: cart.customerId,
-                                customerName: cart.customerName,
-                                priceMultiplier: value ? 0.95 : 1.0,
-                              );
-                            },
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _regularPricing ? 'Tarif régulier (-5%)' : 'Tarif standard passage',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                              Transform.scale(
+                                scale: 0.85,
+                                child: Switch(
+                                  value: _regularPricing,
+                                  onChanged: (value) {
+                                    setState(() => _regularPricing = value);
+                                    cart.setCustomer(
+                                      customerId: cart.customerId,
+                                      customerName: cart.customerName,
+                                      priceMultiplier: value ? 0.95 : 1.0,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -310,122 +343,158 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                 ),
                 Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16.0),
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                     itemCount: cart.items.length,
-                    separatorBuilder: (ctx, i) => const Divider(height: 1),
                     itemBuilder: (ctx, i) {
                       final item = cart.items[i];
 
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(
-                              child: Column(
+                      return Card(
+                        elevation: 0,
+                        color: theme.colorScheme.surfaceContainerLow,
+                        margin: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    item.product.name,
-                                    style: theme.textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 6,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: theme.colorScheme.primaryContainer,
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text(
-                                          item.unitLabel.toUpperCase(),
-                                          style: theme.textTheme.labelSmall?.copyWith(
-                                            color: theme.colorScheme.onPrimaryContainer,
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.product.name,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.titleSmall?.copyWith(
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        '${(item.effectiveUnitPrice * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND / ${item.unitLabel}',
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: theme.colorScheme.onSurfaceVariant,
+                                        const SizedBox(height: 4),
+                                        Wrap(
+                                          crossAxisAlignment: WrapCrossAlignment.center,
+                                          spacing: 6,
+                                          runSpacing: 4,
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: theme.colorScheme.primaryContainer,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                item.unitLabel.toUpperCase(),
+                                                style: theme.textTheme.labelSmall?.copyWith(
+                                                  color: theme.colorScheme.onPrimaryContainer,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                            Text(
+                                              '${(item.effectiveUnitPrice * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND / ${item.unitLabel}',
+                                              style: theme.textTheme.bodySmall?.copyWith(
+                                                color: theme.colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  InkWell(
+                                    onTap: () => cart.removeItem(item.product.id),
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(4),
+                                      child: Icon(Icons.close, size: 18, color: Colors.red),
+                                    ),
                                   ),
                                 ],
                               ),
-                            ),
-                            Row(
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline, size: 20),
-                                  onPressed: () {
-                                    cart.updateQuantity(
-                                      item.product.id,
-                                      item.quantity - 1.0,
-                                    );
-                                  },
-                                ),
-                                InkWell(
-                                  onTap: () => _showQuantityEditDialog(item),
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
-                                    ),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Container(
                                     decoration: BoxDecoration(
                                       border: Border.all(
-                                        color: theme.colorScheme.outline.withValues(alpha: 0.5),
+                                        color: theme.colorScheme.outlineVariant,
                                       ),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        InkWell(
+                                          onTap: () {
+                                            cart.updateQuantity(
+                                              item.product.id,
+                                              item.quantity - 1.0,
+                                            );
+                                          },
+                                          borderRadius: const BorderRadius.horizontal(
+                                            left: Radius.circular(8),
+                                          ),
+                                          child: const Padding(
+                                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                            child: Icon(Icons.remove, size: 16),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () => _showQuantityEditDialog(item),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 6,
+                                            ),
+                                            child: Text(
+                                              '${item.quantity} ${item.unitLabel}',
+                                              style: theme.textTheme.titleSmall?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          onTap: () {
+                                            cart.updateQuantity(
+                                              item.product.id,
+                                              item.quantity + 1.0,
+                                            );
+                                          },
+                                          borderRadius: const BorderRadius.horizontal(
+                                            right: Radius.circular(8),
+                                          ),
+                                          child: const Padding(
+                                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                            child: Icon(Icons.add, size: 16),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Flexible(
                                     child: Text(
-                                      '${item.quantity} ${item.unitLabel}',
-                                      style: theme.textTheme.titleSmall?.copyWith(
+                                      '${(item.subtotal * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium?.copyWith(
                                         fontWeight: FontWeight.bold,
+                                        color: theme.colorScheme.primary,
                                       ),
                                     ),
                                   ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.add_circle_outline, size: 20),
-                                  onPressed: () {
-                                    cart.updateQuantity(
-                                      item.product.id,
-                                      item.quantity + 1.0,
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                            const SizedBox(width: 8),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  '${(item.subtotal * (_regularPricing ? 0.95 : 1.0)).toStringAsFixed(3)} TND',
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: theme.colorScheme.primary,
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.close, size: 18, color: Colors.red),
-                                  onPressed: () => cart.removeItem(item.product.id),
-                                ),
-                              ],
-                            ),
-                          ],
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -448,21 +517,26 @@ class _CartScreenState extends State<CartScreen> {
                       ),
                       const SizedBox(height: 8),
                       SegmentedButton<PaymentMethod>(
+                        showSelectedIcon: false,
+                        style: SegmentedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                        ),
                         segments: const [
                           ButtonSegment(
                             value: PaymentMethod.cash,
                             label: Text('Espèces'),
-                            icon: Icon(Icons.payments_outlined, size: 18),
+                            icon: Icon(Icons.payments_outlined, size: 16),
                           ),
                           ButtonSegment(
                             value: PaymentMethod.check,
                             label: Text('Chèque'),
-                            icon: Icon(Icons.article_outlined, size: 18),
+                            icon: Icon(Icons.article_outlined, size: 16),
                           ),
                           ButtonSegment(
                             value: PaymentMethod.credit,
                             label: Text('Crédit'),
-                            icon: Icon(Icons.account_balance_wallet_outlined, size: 18),
+                            icon: Icon(Icons.account_balance_wallet_outlined, size: 16),
                           ),
                         ],
                         selected: {_paymentMethod},
@@ -470,19 +544,26 @@ class _CartScreenState extends State<CartScreen> {
                           setState(() => _paymentMethod = set.first);
                         },
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Total à payer',
-                            style: theme.textTheme.titleLarge,
+                          Expanded(
+                            child: Text(
+                              'Total à payer',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
-                          Text(
-                            '${cart.totalAmount.toStringAsFixed(3)} TND',
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.primary,
+                          Flexible(
+                            child: Text(
+                              '${cart.totalAmount.toStringAsFixed(3)} TND',
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.primary,
+                              ),
                             ),
                           ),
                         ],

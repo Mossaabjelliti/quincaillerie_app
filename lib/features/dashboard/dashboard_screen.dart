@@ -336,7 +336,7 @@ class _EmployeeDashboardView extends StatelessWidget {
                 label: 'Scanner',
                 color: Colors.blue,
                 onTap: () {
-                  Navigator.of(context).pushNamed('/add-product');
+                  Navigator.of(context).pushNamed('/scanner');
                 },
               ),
             ),

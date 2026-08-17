@@ -31,7 +31,7 @@ UserSession _session(UserRole role) => UserSession(
 
 void main() {
   group('AppNavigation', () {
-    test('owner mobile navigation matches owner menu', () {
+    test('owner mobile navigation matches clean 5-item menu', () {
       final destinations = AppNavigation.visibleDestinations(
         _authz(UserRole.owner),
         platform: AppNavPlatform.mobile,
@@ -41,16 +41,10 @@ void main() {
         destinations.map((d) => d.id).toList(),
         [
           'dashboard',
-          'inventory',
           'sales',
-          'customers',
-          'suppliers',
-          'invoices',
-          'finance',
-          'analytics',
-          'employees',
-          'activity',
-          'settings',
+          'scanner',
+          'inventory',
+          'more',
         ],
       );
     });
@@ -63,22 +57,8 @@ void main() {
 
       expect(
         destinations.map((d) => d.id).toList(),
-        ['home', 'inventory', 'scanner', 'sales', 'customers', 'my_activity'],
+        ['sales', 'scanner', 'inventory', 'customers', 'more'],
       );
-    });
-
-    test('employee navigation excludes owner-only finance and settings', () {
-      final destinations = AppNavigation.visibleDestinations(
-        _authz(UserRole.employee),
-        platform: AppNavPlatform.mobile,
-      );
-
-      final ids = destinations.map((d) => d.id).toSet();
-      expect(ids, isNot(contains('finance')));
-      expect(ids, isNot(contains('analytics')));
-      expect(ids, isNot(contains('employees')));
-      expect(ids, isNot(contains('settings')));
-      expect(ids, isNot(contains('suppliers')));
     });
 
     test('cashier keeps operational employee items without customers', () {
@@ -88,22 +68,85 @@ void main() {
       );
 
       expect(destinations.map((d) => d.id).toList(), [
-        'home',
-        'inventory',
-        'scanner',
         'sales',
-        'my_activity',
+        'scanner',
+        'inventory',
+        'more',
       ]);
     });
 
-    test('desktop owner navigation includes POS instead of scanner', () {
+    test('unfinished features are hidden from primary navigation', () {
+      final ownerMobile = AppNavigation.visibleDestinations(
+        _authz(UserRole.owner),
+        platform: AppNavPlatform.mobile,
+      ).map((d) => d.id).toSet();
+
+      final ownerDesktop = AppNavigation.visibleDestinations(
+        _authz(UserRole.owner),
+        platform: AppNavPlatform.desktop,
+      ).map((d) => d.id).toSet();
+
+      expect(ownerMobile, isNot(contains('invoices')));
+      expect(ownerMobile, isNot(contains('finance')));
+      expect(ownerMobile, isNot(contains('analytics')));
+
+      expect(ownerDesktop, isNot(contains('invoices')));
+      expect(ownerDesktop, isNot(contains('finance')));
+      expect(ownerDesktop, isNot(contains('analytics')));
+    });
+
+    test('employee navigation excludes owner-only areas on desktop', () {
+      final destinations = AppNavigation.visibleDestinations(
+        _authz(UserRole.employee),
+        platform: AppNavPlatform.desktop,
+      );
+
+      final ids = destinations.map((d) => d.id).toSet();
+      expect(ids, isNot(contains('dashboard')));
+      expect(ids, isNot(contains('suppliers')));
+      expect(ids, isNot(contains('employees')));
+      expect(ids, isNot(contains('activity')));
+      expect(ids, contains('pos'));
+      expect(ids, contains('inventory'));
+      expect(ids, contains('sales'));
+      expect(ids, contains('customers'));
+      expect(ids, contains('my_activity'));
+      expect(ids, contains('settings'));
+    });
+
+    test('desktop owner navigation includes POS, inventory, sales, customers, suppliers, dashboard, employees, activity, settings', () {
       final destinations = AppNavigation.visibleDestinations(
         _authz(UserRole.owner),
         platform: AppNavPlatform.desktop,
       );
 
-      expect(destinations.map((d) => d.id), contains('pos'));
+      expect(destinations.map((d) => d.id).toList(), [
+        'dashboard',
+        'pos',
+        'sales',
+        'inventory',
+        'customers',
+        'suppliers',
+        'employees',
+        'activity',
+        'settings',
+      ]);
       expect(destinations.map((d) => d.id), isNot(contains('scanner')));
+    });
+
+    test('scanner is visible on mobile for both owner and employee', () {
+      final ownerMobile = AppNavigation.visibleDestinations(
+        _authz(UserRole.owner),
+        platform: AppNavPlatform.mobile,
+      ).map((d) => d.id).toSet();
+
+      final empMobile = AppNavigation.visibleDestinations(
+        _authz(UserRole.employee),
+        platform: AppNavPlatform.mobile,
+      ).map((d) => d.id).toSet();
+
+      expect(ownerMobile, contains('scanner'));
+      expect(empMobile, contains('scanner'));
     });
 
     test('unauthenticated user sees no destinations', () {

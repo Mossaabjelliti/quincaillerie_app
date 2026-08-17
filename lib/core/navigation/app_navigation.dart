@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 import '../auth/authorization_service.dart';
 import '../auth/permission.dart';
 import '../licensing/entitlement.dart';
+import '../../features/activity/activity_screen.dart';
 import '../../features/admin/member_management_screen.dart';
 import '../../features/customers/customer_debt_screen.dart';
 import '../../features/dashboard/dashboard_screen.dart';
 import '../../features/desktop/desktop_pos_screen.dart';
 import '../../features/inventory/inventory_screen.dart';
+import '../../features/navigation/more_menu_screen.dart';
 import '../../features/sales/sales_screen.dart';
 import '../../features/scan/scan_screen.dart';
+import '../../features/settings/settings_screen.dart';
 import '../../features/suppliers/supplier_management_screen.dart';
 import 'route_guard.dart';
 
@@ -101,6 +104,7 @@ class AppNavigation {
   }
 
   static const List<AppNavDestination> _destinations = [
+    // --- Mobile & Desktop Primary Destinations ---
     AppNavDestination(
       id: 'dashboard',
       label: 'Tableau de bord',
@@ -113,44 +117,12 @@ class AppNavigation {
       builder: _dashboardScreen,
     ),
     AppNavDestination(
-      id: 'home',
-      label: 'Accueil',
-      icon: Icons.home_outlined,
-      permission: Permission.salesView,
-      ownerNav: false,
-      employeeNav: true,
-      platforms: {AppNavPlatform.mobile},
-      builder: _homePlaceholder,
-    ),
-    AppNavDestination(
-      id: 'inventory',
-      label: 'Inventaire',
-      icon: Icons.inventory_2_outlined,
-      permission: Permission.inventoryView,
-      ownerNav: true,
-      employeeNav: true,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
-      licenseFeature: Feature.inventory,
-      builder: _inventoryScreen,
-    ),
-    AppNavDestination(
-      id: 'scanner',
-      label: 'Scanner',
-      icon: Icons.qr_code_scanner,
-      permission: Permission.salesCreate,
-      ownerNav: false,
-      employeeNav: true,
-      platforms: {AppNavPlatform.mobile},
-      licenseFeature: Feature.pos,
-      builder: _scannerScreen,
-    ),
-    AppNavDestination(
       id: 'pos',
       label: 'POS',
       icon: Icons.point_of_sale_outlined,
       permission: Permission.salesCreate,
       ownerNav: true,
-      employeeNav: false,
+      employeeNav: true,
       platforms: {AppNavPlatform.desktop},
       licenseFeature: Feature.pos,
       builder: _posScreen,
@@ -167,13 +139,46 @@ class AppNavigation {
       builder: _salesScreen,
     ),
     AppNavDestination(
+      id: 'scanner',
+      label: 'Scanner',
+      icon: Icons.qr_code_scanner,
+      permission: Permission.salesCreate,
+      ownerNav: true,
+      employeeNav: true,
+      platforms: {AppNavPlatform.mobile},
+      licenseFeature: Feature.pos,
+      builder: _scannerScreen,
+    ),
+    AppNavDestination(
+      id: 'inventory',
+      label: 'Stock',
+      icon: Icons.inventory_2_outlined,
+      permission: Permission.inventoryView,
+      ownerNav: true,
+      employeeNav: true,
+      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
+      licenseFeature: Feature.inventory,
+      builder: _inventoryScreen,
+    ),
+    AppNavDestination(
+      id: 'customers',
+      label: 'Clients',
+      icon: Icons.people_outline,
+      permission: Permission.customersView,
+      ownerNav: false,
+      employeeNav: true,
+      platforms: {AppNavPlatform.mobile},
+      licenseFeature: Feature.customers,
+      builder: _customersScreen,
+    ),
+    AppNavDestination(
       id: 'customers',
       label: 'Clients',
       icon: Icons.people_outline,
       permission: Permission.customersView,
       ownerNav: true,
       employeeNav: true,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
+      platforms: {AppNavPlatform.desktop},
       licenseFeature: Feature.customers,
       builder: _customersScreen,
     ),
@@ -184,41 +189,9 @@ class AppNavigation {
       permission: Permission.suppliersView,
       ownerNav: true,
       employeeNav: false,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
+      platforms: {AppNavPlatform.desktop},
       licenseFeature: Feature.suppliers,
       builder: _suppliersScreen,
-    ),
-    AppNavDestination(
-      id: 'invoices',
-      label: 'Factures',
-      icon: Icons.description_outlined,
-      permission: Permission.invoicesView,
-      ownerNav: true,
-      employeeNav: false,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
-      builder: _invoicesPlaceholder,
-    ),
-    AppNavDestination(
-      id: 'finance',
-      label: 'Finance',
-      icon: Icons.account_balance_wallet_outlined,
-      permission: Permission.reportsFinancial,
-      ownerNav: true,
-      employeeNav: false,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
-      licenseFeature: Feature.reports,
-      builder: _financePlaceholder,
-    ),
-    AppNavDestination(
-      id: 'analytics',
-      label: 'Analytique',
-      icon: Icons.bar_chart_outlined,
-      permission: Permission.reportsAnalytics,
-      ownerNav: true,
-      employeeNav: false,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
-      licenseFeature: Feature.reports,
-      builder: _analyticsPlaceholder,
     ),
     AppNavDestination(
       id: 'employees',
@@ -227,7 +200,7 @@ class AppNavigation {
       permission: Permission.employeesView,
       ownerNav: true,
       employeeNav: false,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
+      platforms: {AppNavPlatform.desktop},
       licenseFeature: Feature.settings,
       builder: _employeesScreen,
     ),
@@ -238,8 +211,8 @@ class AppNavigation {
       permission: Permission.activityView,
       ownerNav: true,
       employeeNav: false,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
-      builder: _activityPlaceholder,
+      platforms: {AppNavPlatform.desktop},
+      builder: _activityOwnerScreen,
     ),
     AppNavDestination(
       id: 'my_activity',
@@ -248,27 +221,68 @@ class AppNavigation {
       permission: Permission.activityViewOwn,
       ownerNav: false,
       employeeNav: true,
-      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
-      builder: _myActivityPlaceholder,
+      platforms: {AppNavPlatform.desktop},
+      builder: _activityEmployeeScreen,
     ),
     AppNavDestination(
       id: 'settings',
       label: 'Paramètres',
       icon: Icons.settings_outlined,
-      permission: Permission.settingsManage,
+      permission: Permission.salesView,
       ownerNav: true,
+      employeeNav: true,
+      platforms: {AppNavPlatform.desktop},
+      licenseFeature: Feature.settings,
+      builder: _settingsScreen,
+    ),
+    AppNavDestination(
+      id: 'more',
+      label: 'Plus',
+      icon: Icons.more_horiz_rounded,
+      permission: Permission.salesView,
+      ownerNav: true,
+      employeeNav: true,
+      platforms: {AppNavPlatform.mobile},
+      builder: _moreMenuScreen,
+    ),
+
+    // --- Unfinished Features (Hidden from primary navigation; architecture/routes preserved) ---
+    AppNavDestination(
+      id: 'invoices',
+      label: 'Factures',
+      icon: Icons.description_outlined,
+      permission: Permission.invoicesView,
+      ownerNav: false,
       employeeNav: false,
       platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
-      licenseFeature: Feature.settings,
-      builder: _settingsPlaceholder,
+      builder: _invoicesPlaceholder,
+    ),
+    AppNavDestination(
+      id: 'finance',
+      label: 'Finance',
+      icon: Icons.account_balance_wallet_outlined,
+      permission: Permission.reportsFinancial,
+      ownerNav: false,
+      employeeNav: false,
+      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
+      licenseFeature: Feature.reports,
+      builder: _financePlaceholder,
+    ),
+    AppNavDestination(
+      id: 'analytics',
+      label: 'Analytique',
+      icon: Icons.bar_chart_outlined,
+      permission: Permission.reportsAnalytics,
+      ownerNav: false,
+      employeeNav: false,
+      platforms: {AppNavPlatform.mobile, AppNavPlatform.desktop},
+      licenseFeature: Feature.reports,
+      builder: _analyticsPlaceholder,
     ),
   ];
 
   static Widget _dashboardScreen(NavScreenContext ctx) =>
       DashboardScreen(storeId: ctx.storeId);
-
-  static Widget _homePlaceholder(NavScreenContext ctx) =>
-      const NavPlaceholderScreen(title: 'Accueil', icon: Icons.home_outlined);
 
   static Widget _inventoryScreen(NavScreenContext ctx) => InventoryScreen(
         storeId: ctx.storeId,
@@ -297,6 +311,25 @@ class AppNavigation {
 
   static Widget _employeesScreen(NavScreenContext ctx) => const MemberManagementScreen();
 
+  static Widget _activityOwnerScreen(NavScreenContext ctx) => ActivityScreen(
+        storeId: ctx.storeId,
+        userId: ctx.userId,
+        isOwnerView: true,
+      );
+
+  static Widget _activityEmployeeScreen(NavScreenContext ctx) => ActivityScreen(
+        storeId: ctx.storeId,
+        userId: ctx.userId,
+        isOwnerView: false,
+      );
+
+  static Widget _settingsScreen(NavScreenContext ctx) => const SettingsScreen();
+
+  static Widget _moreMenuScreen(NavScreenContext ctx) => MoreMenuScreen(
+        storeId: ctx.storeId,
+        userId: ctx.userId,
+      );
+
   static Widget _invoicesPlaceholder(NavScreenContext ctx) =>
       const NavPlaceholderScreen(title: 'Factures', icon: Icons.description_outlined);
 
@@ -305,15 +338,6 @@ class AppNavigation {
 
   static Widget _analyticsPlaceholder(NavScreenContext ctx) =>
       const NavPlaceholderScreen(title: 'Analytique', icon: Icons.bar_chart_outlined);
-
-  static Widget _activityPlaceholder(NavScreenContext ctx) =>
-      const NavPlaceholderScreen(title: 'Activité', icon: Icons.history);
-
-  static Widget _myActivityPlaceholder(NavScreenContext ctx) =>
-      const NavPlaceholderScreen(title: 'Mon activité', icon: Icons.history_toggle_off);
-
-  static Widget _settingsPlaceholder(NavScreenContext ctx) =>
-      const NavPlaceholderScreen(title: 'Paramètres', icon: Icons.settings_outlined);
 }
 
 class NavPlaceholderScreen extends StatelessWidget {

@@ -108,6 +108,8 @@ class SyncService {
     await _pushSales(storeId);
     await _pushDebts(storeId);
     await _pushDebtPayments(storeId);
+    // Invoices sync disabled until feature is actively deployed to backend
+    // await _pushInvoices(storeId);
   }
 
   Future<void> _pullStore(String storeId) async {
@@ -116,6 +118,8 @@ class SyncService {
     await _pullStockMovements(storeId);
     await _pullSales(storeId);
     await _pullSaleItems(storeId);
+    // Invoices sync disabled until feature is actively deployed to backend
+    // await _pullInvoices(storeId);
     await _pullCustomers(storeId);
     await _pullDebts(storeId);
     await _pullDebtPayments(storeId);
@@ -220,6 +224,8 @@ class SyncService {
             'quantity': item.quantity,
             'unit_price': item.unitPrice,
             'subtotal': item.subtotal,
+            'product_name': item.productName,
+            'unit_label': item.unitLabel,
           }],
           'p_debt': debt == null ? null : {
             'id': debt.id,
@@ -242,10 +248,96 @@ class SyncService {
           await (db.update(db.stockMovements)..where((row) => row.id.equals(movement.id)))
               .write(const StockMovementsCompanion(synced: Value(true)));
         }
+        // The invoice is created atomically by checkout_sale on the server.
+        // Reconcile the local provisional invoice with the authoritative
+        // server invoice (number/status/issuedAt), then mark it synced.
+        final invoice = await (db.select(db.invoices)
+              ..where((row) => row.saleId.equals(sale.id)))
+            .getSingleOrNull();
+        if (invoice != null) {
+          await _reconcileInvoiceFromServer(sale.id, invoice);
+        }
       } catch (e) {
         await _logError('sales', sale.id, 'PUSH', e.toString());
       }
     }
+  }
+
+  /// Pushes local unsynced invoices. Disabled from default sync loop until backend invoices feature is activated.
+  Future<void> pushInvoices(String storeId) async {
+    final unsynced = await (db.select(db.invoices)
+          ..where((i) => i.storeId.equals(storeId) & i.synced.equals(false)))
+        .get();
+    for (final invoice in unsynced) {
+      try {
+        // The authoritative invoice is created by checkout_sale on the server.
+        // If the sale is already synced but the invoice is not (e.g. app
+        // restart between the sale push and reconciliation), fetch the server
+        // invoice and apply its authoritative values. Never upsert the
+        // provisional number to the server.
+        final sale = await (db.select(db.sales)
+              ..where((row) => row.id.equals(invoice.saleId)))
+            .getSingleOrNull();
+        if (sale == null || !sale.synced) {
+          // Sale not yet pushed; the RPC will create the invoice. Skip.
+          continue;
+        }
+        await _reconcileInvoiceFromServer(invoice.saleId, invoice);
+      } catch (e) {
+        await _logError('invoices', invoice.id, 'PUSH', e.toString());
+      }
+    }
+  }
+
+  /// Fetches the authoritative server invoice for [saleId] and applies its
+  /// values (invoiceNumber/status/issuedAt) to the local [localInvoice],
+  /// then marks it synced. Never creates a second invoice and never pushes
+  /// the provisional number to the server.
+  Future<void> _reconcileInvoiceFromServer(String saleId, Invoice localInvoice) async {
+    try {
+      final server = await supabase
+          .from('invoices')
+          .select()
+          .eq('sale_id', saleId)
+          .maybeSingle();
+      if (server == null) {
+        // Server invoice not found (shouldn't happen after a successful RPC).
+        // Leave the local invoice unsynced so a later retry can reconcile.
+        return;
+      }
+      final update = invoiceReconciliationUpdate(
+        serverInvoice: server,
+        localInvoice: localInvoice,
+      );
+      if (update == null) return;
+      await (db.update(db.invoices)..where((row) => row.id.equals(localInvoice.id)))
+          .write(update);
+    } catch (_) {
+      // Invoices table missing or not configured remotely; skip reconciliation safely.
+    }
+  }
+
+  /// Computes the authoritative invoice update from a server invoice row.
+  ///
+  /// The server invoice number is authoritative and replaces the provisional
+  /// local number. Returns null when the server row has no usable number
+  /// (nothing to apply). Pure and idempotent: applying the returned update
+  /// repeatedly yields the same result and never creates a second invoice.
+  static InvoicesCompanion? invoiceReconciliationUpdate({
+    required Map<String, dynamic> serverInvoice,
+    required Invoice localInvoice,
+  }) {
+    final number = serverInvoice['invoice_number'] as String?;
+    if (number == null || number.isEmpty) return null;
+    return InvoicesCompanion(
+      invoiceNumber: Value(number),
+      status: Value(serverInvoice['status'] as String? ?? 'ISSUED'),
+      issuedAt: Value(
+        DateTime.tryParse(serverInvoice['issued_at'] as String? ?? '') ??
+            localInvoice.issuedAt,
+      ),
+      synced: const Value(true),
+    );
   }
 
   Future<void> _pushCustomers(String storeId) async {
@@ -595,12 +687,37 @@ class SyncService {
                     quantity: (remote['quantity'] as num).toDouble(),
                     unitPrice: (remote['unit_price'] as num).toDouble(),
                     subtotal: (remote['subtotal'] as num).toDouble(),
+                    productName: Value(remote['product_name'] as String? ?? ''),
+                    unitLabel: Value(remote['unit_label'] as String? ?? ''),
                 ),
               );
         }
       }
     } catch (e) {
       await _logError('sale_items', storeId, 'PULL', e.toString());
+    }
+  }
+
+  /// Pulls remote invoices. Disabled from default sync loop until backend invoices feature is activated.
+  Future<void> pullInvoices(String storeId) async {
+    try {
+      final remoteRows = await supabase.from('invoices').select().eq('store_id', storeId);
+      for (final remote in remoteRows as List) {
+        await db.into(db.invoices).insertOnConflictUpdate(
+              InvoicesCompanion.insert(
+                id: remote['id'] as String,
+                storeId: remote['store_id'] as String,
+                saleId: remote['sale_id'] as String,
+                invoiceNumber: remote['invoice_number'] as String,
+                status: Value(remote['status'] as String? ?? 'ISSUED'),
+                issuedAt: DateTime.tryParse(remote['issued_at'] as String? ?? '') ?? DateTime.now(),
+                createdAt: Value(DateTime.tryParse(remote['created_at'] as String? ?? '') ?? DateTime.now()),
+                synced: const Value(true),
+              ),
+            );
+      }
+    } catch (e) {
+      await _logError('invoices', storeId, 'PULL', e.toString());
     }
   }
 

@@ -61,6 +61,13 @@ class _SalesScreenState extends State<SalesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Historique des ventes'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            tooltip: 'Scanner / Nouvelle vente',
+            onPressed: () => Navigator.of(context).pushNamed('/scanner'),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -138,6 +145,12 @@ class _SalesScreenState extends State<SalesScreen> {
                         Text(
                           'Aucune vente trouvée',
                           style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).pushNamed('/scanner'),
+                          icon: const Icon(Icons.qr_code_scanner),
+                          label: const Text('Nouvelle vente (Scanner)'),
                         ),
                       ],
                     ),
