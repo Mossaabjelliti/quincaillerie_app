@@ -130,8 +130,8 @@ docs/
 ### Installation
 
 ```bash
-git clone https://github.com/Mossaabjelliti/quincaillerie_app.git
-cd quincaillerie_app
+git clone https://github.com/Mossaabjelliti/Stocki.git
+cd Stocki
 
 flutter pub get
 dart run build_runner build --delete-conflicting-outputs
