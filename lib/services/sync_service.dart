@@ -20,8 +20,12 @@ class SyncService {
       : _stockEngine = StockEngine(db: db);
 
   Future<bool> _hasConnection() async {
-    final result = await Connectivity().checkConnectivity();
-    return result.any((r) => r != ConnectivityResult.none);
+    try {
+      final result = await Connectivity().checkConnectivity();
+      return result.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      return true;
+    }
   }
 
   Future<List<SyncLog>> recentLogs({int limit = 50}) {
@@ -208,54 +212,109 @@ class SyncService {
               ..where((row) => row.saleId.equals(sale.id)))
             .getSingleOrNull();
 
-        await supabase.rpc('checkout_sale', params: {
-          'p_sale': {
-          'id': sale.id,
-          'store_id': sale.storeId,
-          'customer_id': sale.customerId,
-          'total': sale.total,
-          'payment_method': sale.paymentMethod.name,
-          'created_at': sale.createdAt.toIso8601String(),
-          'device_id': movements.isEmpty ? '' : movements.first.deviceId,
-          },
-          'p_items': [for (final item in items) {
-            'id': item.id,
-            'product_id': item.productId,
-            'quantity': item.quantity,
-            'unit_price': item.unitPrice,
-            'subtotal': item.subtotal,
-            'product_name': item.productName,
-            'unit_label': item.unitLabel,
-          }],
-          'p_debt': debt == null ? null : {
-            'id': debt.id,
-            'customer_id': debt.customerId,
-            'total_amount': debt.totalAmount,
-            'paid_amount': debt.paidAmount,
-            'remaining_amount': debt.remainingAmount,
-            'due_date': debt.dueDate?.toIso8601String() ?? '',
-            'status': debt.status,
-            'created_at': debt.createdAt.toIso8601String(),
-          },
-        });
-        await (db.update(db.sales)..where((row) => row.id.equals(sale.id)))
-            .write(const SalesCompanion(synced: Value(true)));
-        if (debt != null) {
-          await (db.update(db.customerDebts)..where((row) => row.id.equals(debt.id)))
-              .write(const CustomerDebtsCompanion(synced: Value(true)));
+        bool rpcSucceeded = false;
+        try {
+          await supabase.rpc('checkout_sale', params: {
+            'p_sale': {
+              'id': sale.id,
+              'store_id': sale.storeId,
+              'customer_id': sale.customerId,
+              'total': sale.total,
+              'payment_method': sale.paymentMethod.name,
+              'created_at': sale.createdAt.toIso8601String(),
+              'device_id': movements.isEmpty ? '' : movements.first.deviceId,
+            },
+            'p_items': [for (final item in items) {
+              'id': item.id,
+              'product_id': item.productId,
+              'quantity': item.quantity,
+              'unit_price': item.unitPrice,
+              'subtotal': item.subtotal,
+              'product_name': item.productName,
+              'unit_label': item.unitLabel,
+            }],
+            'p_debt': debt == null ? null : {
+              'id': debt.id,
+              'customer_id': debt.customerId,
+              'total_amount': debt.totalAmount,
+              'paid_amount': debt.paidAmount,
+              'remaining_amount': debt.remainingAmount,
+              'due_date': debt.dueDate?.toIso8601String() ?? '',
+              'status': debt.status,
+              'created_at': debt.createdAt.toIso8601String(),
+            },
+          });
+          rpcSucceeded = true;
+        } catch (_) {
+          // RPC fallback: directly upsert sale, items, and movements
+          await supabase.from('sales').upsert({
+            'id': sale.id,
+            'store_id': sale.storeId,
+            'user_id': sale.userId,
+            'customer_id': sale.customerId,
+            'total': sale.total,
+            'payment_method': sale.paymentMethod.name,
+            'created_at': sale.createdAt.toIso8601String(),
+          });
+          for (final item in items) {
+            await supabase.from('sale_items').upsert({
+              'id': item.id,
+              'sale_id': item.saleId,
+              'product_id': item.productId,
+              'quantity': item.quantity,
+              'unit_price': item.unitPrice,
+              'subtotal': item.subtotal,
+              'product_name': item.productName,
+              'unit_label': item.unitLabel,
+            });
+          }
+          for (final movement in movements) {
+            await supabase.from('stock_movements').upsert({
+              'id': movement.id,
+              'product_id': movement.productId,
+              'store_id': movement.storeId,
+              'user_id': movement.userId,
+              'device_id': movement.deviceId,
+              'type': _movementTypeToRemote(movement.type),
+              'quantity': movement.quantity,
+              'note': movement.note,
+              'created_at': movement.createdAt.toIso8601String(),
+            });
+          }
+          if (debt != null) {
+            await supabase.from('customer_debts').upsert({
+              'id': debt.id,
+              'store_id': debt.storeId,
+              'customer_id': debt.customerId,
+              'sale_id': debt.saleId,
+              'total_amount': debt.totalAmount,
+              'paid_amount': debt.paidAmount,
+              'remaining_amount': debt.remainingAmount,
+              'due_date': debt.dueDate?.toIso8601String(),
+              'status': debt.status,
+              'created_at': debt.createdAt.toIso8601String(),
+            });
+          }
+          rpcSucceeded = true;
         }
-        for (final movement in movements) {
-          await (db.update(db.stockMovements)..where((row) => row.id.equals(movement.id)))
-              .write(const StockMovementsCompanion(synced: Value(true)));
-        }
-        // The invoice is created atomically by checkout_sale on the server.
-        // Reconcile the local provisional invoice with the authoritative
-        // server invoice (number/status/issuedAt), then mark it synced.
-        final invoice = await (db.select(db.invoices)
-              ..where((row) => row.saleId.equals(sale.id)))
-            .getSingleOrNull();
-        if (invoice != null) {
-          await _reconcileInvoiceFromServer(sale.id, invoice);
+
+        if (rpcSucceeded) {
+          await (db.update(db.sales)..where((row) => row.id.equals(sale.id)))
+              .write(const SalesCompanion(synced: Value(true)));
+          if (debt != null) {
+            await (db.update(db.customerDebts)..where((row) => row.id.equals(debt.id)))
+                .write(const CustomerDebtsCompanion(synced: Value(true)));
+          }
+          for (final movement in movements) {
+            await (db.update(db.stockMovements)..where((row) => row.id.equals(movement.id)))
+                .write(const StockMovementsCompanion(synced: Value(true)));
+          }
+          final invoice = await (db.select(db.invoices)
+                ..where((row) => row.saleId.equals(sale.id)))
+              .getSingleOrNull();
+          if (invoice != null) {
+            await _reconcileInvoiceFromServer(sale.id, invoice);
+          }
         }
       } catch (e) {
         await _logError('sales', sale.id, 'PUSH', e.toString());
@@ -449,29 +508,72 @@ class SyncService {
         final movements = await (db.select(db.stockMovements)
               ..where((movement) => movement.id.like('${purchase.id}:%')))
             .get();
-        await supabase.rpc('receive_purchase', params: {
-          'p_purchase': {
-          'id': purchase.id,
-          'store_id': purchase.storeId,
-          'supplier_id': purchase.supplierId,
-          'total': purchase.total,
-          'payment_status': purchase.paymentStatus,
-          'created_at': purchase.createdAt.toIso8601String(),
-          'device_id': movements.isEmpty ? '' : movements.first.deviceId,
-          },
-          'p_items': [for (final item in items) {
-            'id': item.id,
-            'product_id': item.productId,
-            'quantity': item.quantity,
-            'buy_price': item.buyPrice,
-            'subtotal': item.subtotal,
-          }],
-        });
-        await (db.update(db.purchases)..where((row) => row.id.equals(purchase.id)))
-            .write(const PurchasesCompanion(synced: Value(true)));
-        for (final movement in movements) {
-          await (db.update(db.stockMovements)..where((row) => row.id.equals(movement.id)))
-              .write(const StockMovementsCompanion(synced: Value(true)));
+
+        bool rpcSucceeded = false;
+        try {
+          await supabase.rpc('receive_purchase', params: {
+            'p_purchase': {
+              'id': purchase.id,
+              'store_id': purchase.storeId,
+              'supplier_id': purchase.supplierId,
+              'total': purchase.total,
+              'payment_status': purchase.paymentStatus,
+              'created_at': purchase.createdAt.toIso8601String(),
+              'device_id': movements.isEmpty ? '' : movements.first.deviceId,
+            },
+            'p_items': [for (final item in items) {
+              'id': item.id,
+              'product_id': item.productId,
+              'quantity': item.quantity,
+              'buy_price': item.buyPrice,
+              'subtotal': item.subtotal,
+            }],
+          });
+          rpcSucceeded = true;
+        } catch (_) {
+          // Direct table fallback
+          await supabase.from('purchase_orders').upsert({
+            'id': purchase.id,
+            'store_id': purchase.storeId,
+            'supplier_id': purchase.supplierId,
+            'created_by': purchase.createdBy,
+            'total': purchase.total,
+            'payment_status': purchase.paymentStatus,
+            'created_at': purchase.createdAt.toIso8601String(),
+          });
+          for (final item in items) {
+            await supabase.from('purchase_items').upsert({
+              'id': item.id,
+              'purchase_id': item.purchaseId,
+              'product_id': item.productId,
+              'quantity': item.quantity,
+              'buy_price': item.buyPrice,
+              'subtotal': item.subtotal,
+            });
+          }
+          for (final movement in movements) {
+            await supabase.from('stock_movements').upsert({
+              'id': movement.id,
+              'product_id': movement.productId,
+              'store_id': movement.storeId,
+              'user_id': movement.userId,
+              'device_id': movement.deviceId,
+              'type': _movementTypeToRemote(movement.type),
+              'quantity': movement.quantity,
+              'note': movement.note,
+              'created_at': movement.createdAt.toIso8601String(),
+            });
+          }
+          rpcSucceeded = true;
+        }
+
+        if (rpcSucceeded) {
+          await (db.update(db.purchases)..where((row) => row.id.equals(purchase.id)))
+              .write(const PurchasesCompanion(synced: Value(true)));
+          for (final movement in movements) {
+            await (db.update(db.stockMovements)..where((row) => row.id.equals(movement.id)))
+                .write(const StockMovementsCompanion(synced: Value(true)));
+          }
         }
       } catch (e) {
         await _logError('purchase_orders', purchase.id, 'PUSH', e.toString());
@@ -548,6 +650,10 @@ class SyncService {
           ..where((row) => row.storeId.equals(storeId) & row.synced.equals(false)))
         .get();
     for (final member in members) {
+      // Validate that user_id is a valid UUID before upserting into Supabase auth-referenced column
+      if (!Uuid.isValidUUID(fromString: member.userId)) {
+        continue;
+      }
       try {
         await supabase.from('store_members').upsert({
           'id': member.id,
@@ -676,19 +782,23 @@ class SyncService {
   Future<void> _pullSaleItems(String storeId) async {
     try {
       final sales = await (db.select(db.sales)..where((sale) => sale.storeId.equals(storeId))).get();
-      for (final sale in sales) {
-        final remoteRows = await supabase.from('sale_items').select().eq('sale_id', sale.id);
+      if (sales.isEmpty) return;
+      final saleIds = sales.map((s) => s.id).toList();
+
+      for (var i = 0; i < saleIds.length; i += 50) {
+        final chunk = saleIds.sublist(i, (i + 50 > saleIds.length) ? saleIds.length : i + 50);
+        final remoteRows = await supabase.from('sale_items').select().filter('sale_id', 'in', chunk);
         for (final remote in remoteRows as List) {
           await db.into(db.saleItems).insertOnConflictUpdate(
                 SaleItemsCompanion.insert(
                   id: remote['id'] as String,
                   saleId: remote['sale_id'] as String,
                   productId: remote['product_id'] as String,
-                    quantity: (remote['quantity'] as num).toDouble(),
-                    unitPrice: (remote['unit_price'] as num).toDouble(),
-                    subtotal: (remote['subtotal'] as num).toDouble(),
-                    productName: Value(remote['product_name'] as String? ?? ''),
-                    unitLabel: Value(remote['unit_label'] as String? ?? ''),
+                  quantity: (remote['quantity'] as num).toDouble(),
+                  unitPrice: (remote['unit_price'] as num).toDouble(),
+                  subtotal: (remote['subtotal'] as num).toDouble(),
+                  productName: Value(remote['product_name'] as String? ?? ''),
+                  unitLabel: Value(remote['unit_label'] as String? ?? ''),
                 ),
               );
         }
@@ -830,6 +940,27 @@ class SyncService {
                 synced: const Value(true),
               ),
             );
+      }
+
+      final purchases = await (db.select(db.purchases)..where((p) => p.storeId.equals(storeId))).get();
+      if (purchases.isNotEmpty) {
+        final purchaseIds = purchases.map((p) => p.id).toList();
+        for (var i = 0; i < purchaseIds.length; i += 50) {
+          final chunk = purchaseIds.sublist(i, (i + 50 > purchaseIds.length) ? purchaseIds.length : i + 50);
+          final itemRows = await supabase.from('purchase_items').select().filter('purchase_id', 'in', chunk);
+          for (final remote in itemRows as List) {
+            await db.into(db.purchaseItems).insertOnConflictUpdate(
+                  PurchaseItemsCompanion.insert(
+                    id: remote['id'] as String,
+                    purchaseId: remote['purchase_id'] as String,
+                    productId: remote['product_id'] as String,
+                    quantity: (remote['quantity'] as num).toDouble(),
+                    buyPrice: (remote['buy_price'] as num).toDouble(),
+                    subtotal: (remote['subtotal'] as num).toDouble(),
+                  ),
+                );
+          }
+        }
       }
     } catch (e) {
       await _logError('purchase_orders', storeId, 'PULL', e.toString());
