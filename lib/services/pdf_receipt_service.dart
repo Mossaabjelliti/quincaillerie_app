@@ -62,6 +62,7 @@ class PdfReceiptService {
     String storeAddress = '',
     String? customerName,
     String? customerPhone,
+    String? invoiceNumber,
   }) async {
     final pdfBytes = await buildA4InvoicePdfBytes(
       sale: sale,
@@ -72,11 +73,16 @@ class PdfReceiptService {
       storeAddress: storeAddress,
       customerName: customerName,
       customerPhone: customerPhone,
+      invoiceNumber: invoiceNumber,
     );
+
+    final docName = invoiceNumber != null && invoiceNumber.isNotEmpty
+        ? 'Facture_$invoiceNumber.pdf'
+        : 'Facture_${sale.id.substring(0, 8)}.pdf';
 
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdfBytes,
-      name: 'Facture_${sale.id.substring(0, 8)}.pdf',
+      name: docName,
     );
   }
 
@@ -227,10 +233,14 @@ class PdfReceiptService {
     required String storeAddress,
     String? customerName,
     String? customerPhone,
+    String? invoiceNumber,
   }) async {
     final doc = pw.Document();
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
     final productMap = {for (var p in products) p.id: p};
+    final displayInvoiceNumber = invoiceNumber != null && invoiceNumber.isNotEmpty
+        ? invoiceNumber
+        : 'FAC-${sale.id.substring(0, 8).toUpperCase()}';
 
     doc.addPage(
       pw.Page(
@@ -256,7 +266,7 @@ class PdfReceiptService {
                     crossAxisAlignment: pw.CrossAxisAlignment.end,
                     children: [
                       pw.Text('FACTURE', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.blueGrey900)),
-                      pw.Text('N° FAC-${sale.id.substring(0, 8).toUpperCase()}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                      pw.Text('N° $displayInvoiceNumber', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
                       pw.Text('Date: ${dateFormat.format(sale.createdAt)}', style: const pw.TextStyle(fontSize: 10)),
                     ],
                   ),

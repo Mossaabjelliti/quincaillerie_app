@@ -112,8 +112,7 @@ class SyncService {
     await _pushSales(storeId);
     await _pushDebts(storeId);
     await _pushDebtPayments(storeId);
-    // Invoices sync disabled until feature is actively deployed to backend
-    // await _pushInvoices(storeId);
+    await pushInvoices(storeId);
   }
 
   Future<void> _pullStore(String storeId) async {
@@ -122,8 +121,7 @@ class SyncService {
     await _pullStockMovements(storeId);
     await _pullSales(storeId);
     await _pullSaleItems(storeId);
-    // Invoices sync disabled until feature is actively deployed to backend
-    // await _pullInvoices(storeId);
+    await pullInvoices(storeId);
     await _pullCustomers(storeId);
     await _pullDebts(storeId);
     await _pullDebtPayments(storeId);

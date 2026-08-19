@@ -162,18 +162,53 @@ class _CartScreenState extends State<CartScreen> {
                 ],
                 if (latestSale != null) ...[
                   const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.print_outlined),
-                    label: const Text('Imprimer le reçu (PDF)'),
-                    onPressed: () async {
-                      final products = await db.allProducts(widget.storeId);
-                      await PdfReceiptService.printReceipt(
-                        sale: latestSale,
-                        items: saleItems,
-                        products: products,
-                        customerName: cart.customerName,
-                      );
-                    },
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.receipt_long_outlined, size: 16),
+                          label: const Text('Ticket'),
+                          onPressed: () async {
+                            final products = await db.allProducts(widget.storeId);
+                            final store = await (db.select(db.stores)..where((s) => s.id.equals(widget.storeId))).getSingleOrNull();
+                            await PdfReceiptService.printReceipt(
+                              sale: latestSale,
+                              items: saleItems,
+                              products: products,
+                              storeName: store?.name ?? 'QUINCAILLERIE PRO',
+                              customerName: cart.customerName,
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                          label: const Text('Facture A4'),
+                          onPressed: () async {
+                            final products = await db.allProducts(widget.storeId);
+                            final store = await (db.select(db.stores)..where((s) => s.id.equals(widget.storeId))).getSingleOrNull();
+                            Customer? customer;
+                            if (latestSale.customerId.isNotEmpty) {
+                              customer = await (db.select(db.customers)..where((c) => c.id.equals(latestSale.customerId))).getSingleOrNull();
+                            }
+                            final invoice = await (db.select(db.invoices)..where((i) => i.saleId.equals(latestSale.id))).getSingleOrNull();
+                            await PdfReceiptService.printA4Invoice(
+                              sale: latestSale,
+                              items: saleItems,
+                              products: products,
+                              storeName: store?.name ?? 'QUINCAILLERIE PRO',
+                              storePhone: store?.phone ?? '',
+                              storeAddress: store?.address ?? '',
+                              customerName: customer?.name ?? cart.customerName,
+                              customerPhone: customer?.phone,
+                              invoiceNumber: invoice?.invoiceNumber,
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],

@@ -234,25 +234,98 @@ class _SalesScreenState extends State<SalesScreen> {
                                             ],
                                           ),
                                         )),
-                                    const SizedBox(height: 12),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: OutlinedButton.icon(
-                                        icon: const Icon(Icons.print_outlined),
-                                        label: const Text('Imprimer le reçu (PDF)'),
-                                        onPressed: () async {
-                                          final products = await db.allProducts(widget.storeId);
-                                          await PdfReceiptService.printReceipt(
-                                            sale: sale,
-                                            items: items,
-                                            products: products,
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
+                                     const SizedBox(height: 12),
+                                     FutureBuilder<Invoice?>(
+                                       future: (db.select(db.invoices)..where((inv) => inv.saleId.equals(sale.id))).getSingleOrNull(),
+                                       builder: (ctx, invSnap) {
+                                         final invoice = invSnap.data;
+                                         final invoiceNumber = invoice?.invoiceNumber;
+                                         return Column(
+                                           crossAxisAlignment: CrossAxisAlignment.start,
+                                           children: [
+                                             if (invoiceNumber != null) ...[
+                                               Container(
+                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                 decoration: BoxDecoration(
+                                                   color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+                                                   borderRadius: BorderRadius.circular(6),
+                                                 ),
+                                                 child: Row(
+                                                   mainAxisSize: MainAxisSize.min,
+                                                   children: [
+                                                     Icon(Icons.receipt_outlined, size: 16, color: theme.colorScheme.primary),
+                                                     const SizedBox(width: 6),
+                                                     Text(
+                                                       'Facture: $invoiceNumber',
+                                                       style: TextStyle(
+                                                         fontWeight: FontWeight.bold,
+                                                         fontSize: 12,
+                                                         color: theme.colorScheme.primary,
+                                                       ),
+                                                     ),
+                                                   ],
+                                                 ),
+                                               ),
+                                               const SizedBox(height: 10),
+                                             ],
+                                             Row(
+                                               children: [
+                                                 Expanded(
+                                                   child: OutlinedButton.icon(
+                                                     icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                                                     label: const Text('Ticket (80mm)'),
+                                                     onPressed: () async {
+                                                       final products = await db.allProducts(widget.storeId);
+                                                       Customer? customer;
+                                                       if (sale.customerId.isNotEmpty) {
+                                                         customer = await (db.select(db.customers)..where((c) => c.id.equals(sale.customerId))).getSingleOrNull();
+                                                       }
+                                                       final store = await (db.select(db.stores)..where((s) => s.id.equals(widget.storeId))).getSingleOrNull();
+                                                       await PdfReceiptService.printReceipt(
+                                                         sale: sale,
+                                                         items: items,
+                                                         products: products,
+                                                         storeName: store?.name ?? 'QUINCAILLERIE PRO',
+                                                         customerName: customer?.name,
+                                                       );
+                                                     },
+                                                   ),
+                                                 ),
+                                                 const SizedBox(width: 8),
+                                                 Expanded(
+                                                   child: FilledButton.tonalIcon(
+                                                     icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                                                     label: const Text('Facture A4'),
+                                                     onPressed: () async {
+                                                       final products = await db.allProducts(widget.storeId);
+                                                       Customer? customer;
+                                                       if (sale.customerId.isNotEmpty) {
+                                                         customer = await (db.select(db.customers)..where((c) => c.id.equals(sale.customerId))).getSingleOrNull();
+                                                       }
+                                                       final store = await (db.select(db.stores)..where((s) => s.id.equals(widget.storeId))).getSingleOrNull();
+                                                       await PdfReceiptService.printA4Invoice(
+                                                         sale: sale,
+                                                         items: items,
+                                                         products: products,
+                                                         storeName: store?.name ?? 'QUINCAILLERIE PRO',
+                                                         storePhone: store?.phone ?? '',
+                                                         storeAddress: store?.address ?? '',
+                                                         customerName: customer?.name,
+                                                         customerPhone: customer?.phone,
+                                                         invoiceNumber: invoiceNumber,
+                                                       );
+                                                     },
+                                                   ),
+                                                 ),
+                                               ],
+                                             ),
+                                           ],
+                                         );
+                                       },
+                                     ),
+                                   ],
+                                 ),
+                               );
                             },
                           ),
                         ],
